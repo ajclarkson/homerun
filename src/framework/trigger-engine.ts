@@ -1,0 +1,209 @@
+import cron from 'node-cron';
+import type { Automation } from '../types/automation.js';
+import type { Trigger, TriggerEvent } from '../types/triggers.js';
+import type { HAClient, StateChangedEvent } from './ha-client.js';
+
+const DOUBLE_PRESS_WINDOW_MS = 400;
+
+// ---------- Button gesture handler ----------
+
+type GestureState = 'idle' | 'resolving';
+
+class ButtonGestureHandler {
+  private gestureState: GestureState = 'idle';
+  private resolveTimer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(
+    private readonly entityId: string,
+    private readonly dispatch: (event: TriggerEvent) => void,
+  ) {}
+
+  handle(actionState: string): void {
+    const parsed = parseButtonAction(actionState);
+    if (!parsed) return;
+
+    const { button, pressType } = parsed;
+
+    if (this.gestureState === 'idle') {
+      if (pressType === 'short') {
+        this.gestureState = 'resolving';
+        this.resolveTimer = setTimeout(() => {
+          this.resolveTimer = null;
+          this.gestureState = 'idle';
+          this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'single_press', button });
+        }, DOUBLE_PRESS_WINDOW_MS);
+      } else {
+        this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'hold', button });
+      }
+    } else {
+      // resolving — waiting for double press
+      clearTimeout(this.resolveTimer!);
+      this.resolveTimer = null;
+      this.gestureState = 'idle';
+      if (pressType === 'short') {
+        this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'double_press', button });
+      } else {
+        this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'hold', button });
+      }
+    }
+  }
+}
+
+// Classifies a Z2M action state string.
+// Numeric button prefix ("1_short_release") is separated out and returned as `button`.
+// Recognises common Z2M short/hold conventions; returns null for unrecognised values.
+export function parseButtonAction(
+  state: string,
+): { button?: string; pressType: 'short' | 'hold' } | null {
+  const s = state.toLowerCase();
+  const prefixed = s.match(/^(\d+)[_-](.+)$/);
+  const button = prefixed?.[1];
+  const action = prefixed ? prefixed[2] : s;
+
+  if (/long|hold/.test(action)) return { button, pressType: 'hold' };
+  if (/short|click|single/.test(action) || action === 'press' || action === 'on' || action === 'toggle') {
+    return { button, pressType: 'short' };
+  }
+  return null;
+}
+
+// ---------- Trigger Engine ----------
+
+export class TriggerEngine {
+  private readonly buttonHandlers = new Map<string, ButtonGestureHandler>();
+  private readonly cronCleanups: Array<() => void> = [];
+
+  constructor(
+    private readonly automations: Automation<unknown>[],
+    private readonly haClient: HAClient,
+    private readonly onMatch: (automation: Automation<unknown>, event: TriggerEvent) => void,
+  ) {
+    for (const automation of automations) {
+      for (const trigger of automation.triggers) {
+        if (trigger.type === 'button' && !this.buttonHandlers.has(trigger.entity)) {
+          this.buttonHandlers.set(
+            trigger.entity,
+            new ButtonGestureHandler(trigger.entity, (e) => this.dispatch(e)),
+          );
+        }
+      }
+    }
+  }
+
+  start(): void {
+    this.haClient.ready
+      .then(() => {
+        this.haClient.on('state_changed', (event: StateChangedEvent) => {
+          const handler = this.buttonHandlers.get(event.entity_id);
+          if (handler) {
+            handler.handle(event.new_state.state);
+          } else {
+            this.dispatch({
+              type: 'state_changed',
+              entity_id: event.entity_id,
+              old_state: event.old_state,
+              new_state: event.new_state,
+            });
+          }
+        });
+
+        this.setupCronJobs();
+        this.fireOnStartTriggers();
+      })
+      .catch((err) => {
+        console.error('[trigger-engine] failed to start:', err);
+      });
+  }
+
+  // Entry point for Timer Manager loopback and resolved button gestures.
+  dispatch(event: TriggerEvent): void {
+    this.matchAndFire(event);
+  }
+
+  stop(): void {
+    for (const cleanup of this.cronCleanups) cleanup();
+    this.cronCleanups.length = 0;
+  }
+
+  // ---------- Private ----------
+
+  private setupCronJobs(): void {
+    for (const automation of this.automations) {
+      for (const trigger of automation.triggers) {
+        if (trigger.type === 'schedule') {
+          const { cron: expression } = trigger;
+          const task = cron.schedule(expression, () => {
+            this.dispatch({ type: 'schedule', cron: expression });
+          });
+          this.cronCleanups.push(() => task.stop());
+        }
+      }
+    }
+  }
+
+  // on_start is per-automation because each may declare a different delayMs.
+  // It bypasses dispatch/matchAndFire and calls onMatch directly.
+  private fireOnStartTriggers(): void {
+    for (const automation of this.automations) {
+      for (const trigger of automation.triggers) {
+        if (trigger.type === 'on_start') {
+          const delay = trigger.delayMs ?? 0;
+          setTimeout(() => {
+            this.onMatch(automation, { type: 'on_start' });
+          }, delay);
+        }
+      }
+    }
+  }
+
+  private matchAndFire(event: TriggerEvent): void {
+    for (const automation of this.automations) {
+      for (const trigger of automation.triggers) {
+        if (matchesTrigger(trigger, event)) {
+          this.onMatch(automation, event);
+          break; // don't fire the same automation twice for one event
+        }
+      }
+    }
+  }
+}
+
+// ---------- Trigger matching ----------
+
+function matchesTrigger(trigger: Trigger, event: TriggerEvent): boolean {
+  if (trigger.type !== event.type) return false;
+
+  switch (trigger.type) {
+    case 'state_changed': {
+      if (event.type !== 'state_changed') return false;
+      return typeof trigger.entity === 'string'
+        ? trigger.entity === event.entity_id
+        : trigger.entity.test(event.entity_id);
+    }
+    case 'timer_expired': {
+      if (event.type !== 'timer_expired') return false;
+      return trigger.timerKey === event.timerKey;
+    }
+    case 'button': {
+      if (event.type !== 'button') return false;
+      return (
+        trigger.entity === event.entity_id &&
+        trigger.gesture === event.gesture &&
+        (trigger.button === undefined || trigger.button === event.button)
+      );
+    }
+    case 'schedule': {
+      if (event.type !== 'schedule') return false;
+      return trigger.cron === event.cron;
+    }
+    case 'on_start':
+      return event.type === 'on_start';
+    case 'mqtt_in':
+      // Not yet implemented — mqtt_in events are never dispatched.
+      return false;
+    default: {
+      const _exhaustive: never = trigger;
+      return false;
+    }
+  }
+}
