@@ -6,7 +6,7 @@ import type { EntityState } from '../framework/ha-client.js';
 export type Trigger =
   | { type: 'state_changed'; entity: string | RegExp }
   | { type: 'schedule'; cron: string }
-  | { type: 'on_start'; delayMs?: number }
+  | { type: 'on_start' }
   | { type: 'timer_expired'; timerKey: string }
   | { type: 'button'; entity: string; gesture: 'single_press' | 'double_press' | 'hold'; button?: string }
   | { type: 'mqtt_in'; topic: string };
