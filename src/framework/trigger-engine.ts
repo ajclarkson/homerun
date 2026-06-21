@@ -104,8 +104,6 @@ export class TriggerEngine {
             });
           }
         });
-
-        this.fireOnStartTriggers();
       })
       .catch((err) => {
         console.error('[trigger-engine] failed to start:', err);
@@ -118,21 +116,6 @@ export class TriggerEngine {
   }
 
   // ---------- Private ----------
-
-  // on_start is per-automation because each may declare a different delayMs.
-  // It bypasses dispatch/matchAndFire and calls onMatch directly.
-  private fireOnStartTriggers(): void {
-    for (const automation of this.automations) {
-      for (const trigger of automation.triggers) {
-        if (trigger.type === 'on_start') {
-          const delay = trigger.delayMs ?? 0;
-          setTimeout(() => {
-            this.onMatch(automation, { type: 'on_start' });
-          }, delay);
-        }
-      }
-    }
-  }
 
   private matchAndFire(event: TriggerEvent): void {
     for (const automation of this.automations) {

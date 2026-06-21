@@ -8,6 +8,7 @@ export class Scheduler {
   constructor(
     private readonly automations: Automation<unknown>[],
     private readonly dispatch: (event: TriggerEvent) => void,
+    private readonly ready: Promise<void>,
   ) {}
 
   start(): void {
@@ -22,6 +23,12 @@ export class Scheduler {
         }
       }
     }
+
+    this.ready.then(() => {
+      this.dispatch({ type: 'on_start' });
+    }).catch((err) => {
+      console.error('[scheduler] ready promise rejected:', err);
+    });
   }
 
   stop(): void {

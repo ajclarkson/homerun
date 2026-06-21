@@ -182,67 +182,16 @@ describe('TriggerEngine', () => {
   // ---------- on_start ----------
 
   describe('on_start', () => {
-    it('fires after ready with no delay', async () => {
-      const { client, resolveReady } = makeMockHAClient();
-      const onMatch = vi.fn();
-      const automation = makeAutomation('a', [{ type: 'on_start' }]);
-
-      const engine = new TriggerEngine([automation], client, onMatch);
-      engine.start();
-      resolveReady();
-      await vi.runAllTimersAsync();
-
-      expect(onMatch).toHaveBeenCalledOnce();
-      expect(onMatch).toHaveBeenCalledWith(automation, { type: 'on_start' });
-    });
-
-    it('fires after ready with delayMs', async () => {
-      const { client, resolveReady } = makeMockHAClient();
-      const onMatch = vi.fn();
-      const automation = makeAutomation('a', [{ type: 'on_start', delayMs: 5000 }]);
-
-      const engine = new TriggerEngine([automation], client, onMatch);
-      engine.start();
-      resolveReady();
-      await Promise.resolve(); // flush ready.then()
-
-      vi.advanceTimersByTime(4999);
-      expect(onMatch).not.toHaveBeenCalled();
-
-      vi.advanceTimersByTime(1);
-      expect(onMatch).toHaveBeenCalledOnce();
-    });
-
-    it('does not fire before ready', () => {
+    it('routes when dispatched by Scheduler', () => {
       const { client } = makeMockHAClient();
       const onMatch = vi.fn();
       const automation = makeAutomation('a', [{ type: 'on_start' }]);
 
       const engine = new TriggerEngine([automation], client, onMatch);
-      engine.start();
-      vi.runAllTimers();
+      engine.dispatch({ type: 'on_start' });
 
-      expect(onMatch).not.toHaveBeenCalled();
-    });
-
-    it('fires each automation with on_start independently', async () => {
-      const { client, resolveReady } = makeMockHAClient();
-      const onMatch = vi.fn();
-      const a1 = makeAutomation('a1', [{ type: 'on_start' }]);
-      const a2 = makeAutomation('a2', [{ type: 'on_start', delayMs: 2000 }]);
-
-      const engine = new TriggerEngine([a1, a2], client, onMatch);
-      engine.start();
-      resolveReady();
-      await Promise.resolve();
-
-      vi.advanceTimersByTime(0);
-      expect(onMatch).toHaveBeenCalledWith(a1, { type: 'on_start' });
       expect(onMatch).toHaveBeenCalledOnce();
-
-      vi.advanceTimersByTime(2000);
-      expect(onMatch).toHaveBeenCalledTimes(2);
-      expect(onMatch).toHaveBeenCalledWith(a2, { type: 'on_start' });
+      expect(onMatch).toHaveBeenCalledWith(automation, { type: 'on_start' });
     });
   });
 
