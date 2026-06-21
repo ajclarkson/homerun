@@ -127,14 +127,4 @@ it('returns no_action when disabled', () => {
 
 ## Current state
 
-- [x] HA WebSocket connection established
-- [x] State cache populating (1438 entities)
-- [x] State cache as stable in-memory map in `src/framework/ha-client.ts` — `HAClient` with `state`, `context`, reconnect handling
-- [x] Entity registry load (labels) — `config/entity_registry/list`, reloaded on reconnect
-- [ ] Trigger Engine
-- [ ] Pipeline Runner
-- [ ] Action Runtime (with dry-run)
-- [ ] Timer Manager
-- [ ] Observability
-- [ ] Hot reload
-- [ ] Registry + `defineAutomation`
+`HAClient` is complete — see `src/framework/ha-client.ts`. Remaining work is tracked as [GitHub issues](https://github.com/ajclarkson/homerun/issues).
