@@ -1,4 +1,3 @@
-import cron from 'node-cron';
 import type { Automation } from '../types/automation.js';
 import type { Trigger, TriggerEvent } from '../types/triggers.js';
 import type { HAClient, StateChangedEvent } from './ha-client.js';
@@ -71,7 +70,6 @@ export function parseButtonAction(
 
 export class TriggerEngine {
   private readonly buttonHandlers = new Map<string, ButtonGestureHandler>();
-  private readonly cronCleanups: Array<() => void> = [];
 
   constructor(
     private readonly automations: Automation<unknown>[],
@@ -107,7 +105,6 @@ export class TriggerEngine {
           }
         });
 
-        this.setupCronJobs();
         this.fireOnStartTriggers();
       })
       .catch((err) => {
@@ -120,26 +117,7 @@ export class TriggerEngine {
     this.matchAndFire(event);
   }
 
-  stop(): void {
-    for (const cleanup of this.cronCleanups) cleanup();
-    this.cronCleanups.length = 0;
-  }
-
   // ---------- Private ----------
-
-  private setupCronJobs(): void {
-    for (const automation of this.automations) {
-      for (const trigger of automation.triggers) {
-        if (trigger.type === 'schedule') {
-          const { cron: expression } = trigger;
-          const task = cron.schedule(expression, () => {
-            this.dispatch({ type: 'schedule', cron: expression });
-          });
-          this.cronCleanups.push(() => task.stop());
-        }
-      }
-    }
-  }
 
   // on_start is per-automation because each may declare a different delayMs.
   // It bypasses dispatch/matchAndFire and calls onMatch directly.

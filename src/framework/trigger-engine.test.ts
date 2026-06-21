@@ -5,15 +5,6 @@ import type { Automation } from '../types/automation.js';
 import type { TriggerEvent } from '../types/triggers.js';
 import type { HAClient, EntityState, StateChangedEvent } from './ha-client.js';
 
-// ---------- Mock node-cron ----------
-
-// vi.mock is hoisted — use vi.hoisted so the variable is available in the factory.
-const { mockCronSchedule } = vi.hoisted(() => ({
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  mockCronSchedule: vi.fn((_expr: string, _cb: () => void): any => ({ stop: vi.fn() })),
-}));
-vi.mock('node-cron', () => ({ default: { schedule: mockCronSchedule } }));
-
 // ---------- Helpers ----------
 
 function makeEntityState(state: string, entity_id = 'light.test'): EntityState {
@@ -79,7 +70,6 @@ describe('parseButtonAction', () => {
 describe('TriggerEngine', () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    mockCronSchedule.mockClear();
   });
 
   afterEach(() => {
@@ -280,40 +270,6 @@ describe('TriggerEngine', () => {
       engine.dispatch({ type: 'timer_expired', timerKey: 'parlour:lights:off-delay' });
 
       expect(onMatch).not.toHaveBeenCalled();
-    });
-  });
-
-  // ---------- schedule ----------
-
-  describe('schedule', () => {
-    it('registers a cron job for schedule triggers', async () => {
-      const { client, resolveReady } = makeMockHAClient();
-      const automation = makeAutomation('a', [{ type: 'schedule', cron: '0 8 * * *' }]);
-
-      const engine = new TriggerEngine([automation], client, vi.fn());
-      engine.start();
-      resolveReady();
-      await vi.runAllTimersAsync();
-
-      expect(mockCronSchedule).toHaveBeenCalledWith('0 8 * * *', expect.any(Function));
-    });
-
-    it('fires onMatch when cron job fires', async () => {
-      const { client, resolveReady } = makeMockHAClient();
-      const onMatch = vi.fn();
-      const automation = makeAutomation('a', [{ type: 'schedule', cron: '0 8 * * *' }]);
-
-      const engine = new TriggerEngine([automation], client, onMatch);
-      engine.start();
-      resolveReady();
-      await vi.runAllTimersAsync();
-
-      // Invoke the registered cron callback directly.
-      const [, cronCallback] = mockCronSchedule.mock.calls[0] as [string, () => void];
-      cronCallback();
-
-      expect(onMatch).toHaveBeenCalledOnce();
-      expect(onMatch).toHaveBeenCalledWith(automation, { type: 'schedule', cron: '0 8 * * *' });
     });
   });
 
