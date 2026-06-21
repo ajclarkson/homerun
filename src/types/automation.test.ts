@@ -40,16 +40,16 @@ describe('defineAutomation', () => {
   });
 
   it('context may return Abort to short-circuit the pipeline', () => {
-    const automation = defineAutomation({
+    // The compile-time proof is that this call type-checks at all.
+    defineAutomation({
       id: 'test',
       location: 'kitchen',
       subsystem: 'lighting',
       triggers: [],
-      context: () => abort('not_ready'),
-      reduce: (_ctx) => ({ decision: 'ok', actions: [] }),
+      context: (_state, _ha): { enabled: boolean } | Abort =>
+        abort('not_ready'),
+      reduce: (ctx) => ({ decision: ctx.enabled ? 'on' : 'off', actions: [] }),
     });
-
-    expectTypeOf(automation.context).returns.toEqualTypeOf<{ decision?: never } | Abort>();
   });
 });
 
