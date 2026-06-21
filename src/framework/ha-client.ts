@@ -1,0 +1,177 @@
+import {
+  createConnection,
+  createLongLivedTokenAuth,
+  subscribeEntities,
+  type Connection,
+  type HassEntities,
+  type HassEntity,
+} from 'home-assistant-js-websocket';
+import { EventEmitter } from 'node:events';
+
+// ---------- Public types ----------
+
+export interface EntityState {
+  entity_id: string;
+  state: string;
+  attributes: Record<string, unknown>;
+  last_changed: string;
+  last_updated: string;
+}
+
+export type HAState = (entity: string) => EntityState | undefined;
+
+export interface HAContext {
+  entitiesByLabel: (label: string) => string[];
+  labelsFor: (entity: string) => string[];
+}
+
+export interface StateChangedEvent {
+  entity_id: string;
+  old_state: EntityState | undefined;
+  new_state: EntityState;
+}
+
+// ---------- Internal types ----------
+
+interface EntityRegistryEntry {
+  entity_id: string;
+  labels?: string[];
+}
+
+// ---------- Typed EventEmitter overloads ----------
+
+export declare interface HAClient {
+  on(event: 'state_changed', listener: (e: StateChangedEvent) => void): this;
+  on(event: 'ready', listener: () => void): this;
+  on(event: 'reconnected', listener: () => void): this;
+  emit(event: 'state_changed', e: StateChangedEvent): boolean;
+  emit(event: 'ready'): boolean;
+  emit(event: 'reconnected'): boolean;
+}
+
+export class HAClient extends EventEmitter {
+  private readonly stateCache = new Map<string, EntityState>();
+  private readonly labelToEntities = new Map<string, Set<string>>();
+  private readonly entityToLabels = new Map<string, string[]>();
+
+  private connection: Connection | null = null;
+
+  // True between a disconnect event and the next subscribeEntities callback.
+  // During this window we repopulate silently — no state_changed events emitted.
+  private reconnecting = false;
+
+  private _readyResolve!: () => void;
+  readonly ready: Promise<void> = new Promise((resolve) => {
+    this._readyResolve = resolve;
+  });
+
+  // Synchronous accessors passed into context builders.
+  readonly state: HAState = (entity) => this.stateCache.get(entity);
+
+  readonly context: HAContext = {
+    entitiesByLabel: (label) => Array.from(this.labelToEntities.get(label) ?? []),
+    labelsFor: (entity) => this.entityToLabels.get(entity) ?? [],
+  };
+
+  get entityCount(): number {
+    return this.stateCache.size;
+  }
+
+  async connect(url: string, token: string): Promise<void> {
+    const auth = createLongLivedTokenAuth(url, token);
+    this.connection = await createConnection({ auth });
+
+    // Reload registry and repopulate cache silently on reconnect.
+    this.connection.addEventListener('disconnected', () => {
+      this.reconnecting = true;
+    });
+
+    await this.loadEntityRegistry();
+
+    let firstSnapshot = true;
+
+    subscribeEntities(this.connection, (entities: HassEntities) => {
+      if (firstSnapshot) {
+        firstSnapshot = false;
+        this.repopulateCache(entities);
+        this._readyResolve();
+        this.emit('ready');
+      } else if (this.reconnecting) {
+        this.reconnecting = false;
+        // Reload registry in the background — don't block the cache repopulate.
+        this.loadEntityRegistry().catch((err) => {
+          console.error('[ha-client] registry reload failed after reconnect:', err);
+        });
+        this.repopulateCache(entities);
+        this.emit('reconnected');
+      } else {
+        this.diffAndUpdate(entities);
+      }
+    });
+  }
+
+  // ---------- Private ----------
+
+  private repopulateCache(entities: HassEntities): void {
+    this.stateCache.clear();
+    for (const [id, entity] of Object.entries(entities)) {
+      this.stateCache.set(id, toEntityState(id, entity));
+    }
+  }
+
+  private diffAndUpdate(entities: HassEntities): void {
+    for (const [id, rawEntity] of Object.entries(entities)) {
+      const old_state = this.stateCache.get(id);
+      const new_state = toEntityState(id, rawEntity);
+
+      // last_updated changes whenever state or attributes change in HA.
+      if (!old_state || old_state.last_updated !== new_state.last_updated) {
+        this.stateCache.set(id, new_state);
+        this.emit('state_changed', { entity_id: id, old_state, new_state });
+      }
+    }
+
+    // Prune entities that disappeared from the snapshot.
+    for (const id of this.stateCache.keys()) {
+      if (!(id in entities)) {
+        this.stateCache.delete(id);
+      }
+    }
+  }
+
+  private async loadEntityRegistry(): Promise<void> {
+    if (!this.connection) return;
+
+    const entries = (await this.connection.sendMessagePromise({
+      type: 'config/entity_registry/list',
+    })) as EntityRegistryEntry[];
+
+    this.labelToEntities.clear();
+    this.entityToLabels.clear();
+
+    for (const entry of entries) {
+      const labels = entry.labels ?? [];
+      this.entityToLabels.set(entry.entity_id, labels);
+      for (const label of labels) {
+        let set = this.labelToEntities.get(label);
+        if (!set) {
+          set = new Set();
+          this.labelToEntities.set(label, set);
+        }
+        set.add(entry.entity_id);
+      }
+    }
+  }
+}
+
+// ---------- Helpers ----------
+
+function toEntityState(entity_id: string, entity: HassEntity): EntityState {
+  return {
+    entity_id,
+    state: entity.state,
+    attributes: entity.attributes as Record<string, unknown>,
+    last_changed: entity.last_changed,
+    last_updated: entity.last_updated,
+  };
+}
