@@ -1,10 +1,12 @@
 import {
+  callService,
   createConnection,
   createLongLivedTokenAuth,
   subscribeEntities,
   type Connection,
   type HassEntities,
   type HassEntity,
+  type HassServiceTarget,
 } from 'home-assistant-js-websocket';
 import { EventEmitter } from 'node:events';
 
@@ -75,6 +77,16 @@ export class HAClient extends EventEmitter {
 
   get entityCount(): number {
     return this.stateCache.size;
+  }
+
+  async callService(
+    domain: string,
+    service: string,
+    target?: HassServiceTarget,
+    data?: Record<string, unknown>,
+  ): Promise<void> {
+    if (!this.connection) throw new Error('HAClient not connected');
+    await callService(this.connection, domain, service, data, target);
   }
 
   async connect(url: string, token: string): Promise<void> {
