@@ -332,6 +332,35 @@ describe('TriggerEngine', () => {
       expect(onMatch).toHaveBeenCalledWith(a1, expect.objectContaining({ gesture: 'single_press' }));
     });
 
+    it('fires single_press immediately when no double_press trigger is declared', async () => {
+      const { client, resolveReady, emitStateChanged } = makeMockHAClient();
+      const onMatch = vi.fn();
+      const automation = makeAutomation('a', [
+        { type: 'button', entity: 'sensor.button', gesture: 'single_press' },
+        { type: 'button', entity: 'sensor.button', gesture: 'hold' },
+        // no double_press — single_press should fire without waiting
+      ]);
+
+      const engine = new TriggerEngine([automation], client, onMatch);
+      engine.start();
+      resolveReady();
+      await vi.runAllTimersAsync();
+
+      press(emitStateChanged);
+      expect(onMatch).toHaveBeenCalledOnce();
+      expect(onMatch).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ gesture: 'single_press' }));
+    });
+
+    it('still waits 400ms when double_press is declared alongside single_press', async () => {
+      const { onMatch, emitStateChanged } = await setupButtonEngine(); // declares all three
+
+      press(emitStateChanged);
+      expect(onMatch).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(400);
+      expect(onMatch).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ gesture: 'single_press' }));
+    });
+
     it('passes numeric button identifier through to the trigger event', async () => {
       const { onMatch, emitStateChanged } = await setupButtonEngine();
 

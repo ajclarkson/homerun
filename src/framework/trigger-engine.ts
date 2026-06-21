@@ -15,6 +15,7 @@ class ButtonGestureHandler {
   constructor(
     private readonly entityId: string,
     private readonly dispatch: (event: TriggerEvent) => void,
+    private readonly supportsDoublePress: boolean,
   ) {}
 
   handle(actionState: string): void {
@@ -25,12 +26,16 @@ class ButtonGestureHandler {
 
     if (this.gestureState === 'idle') {
       if (pressType === 'short') {
-        this.gestureState = 'resolving';
-        this.resolveTimer = setTimeout(() => {
-          this.resolveTimer = null;
-          this.gestureState = 'idle';
+        if (!this.supportsDoublePress) {
           this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'single_press', button });
-        }, DOUBLE_PRESS_WINDOW_MS);
+        } else {
+          this.gestureState = 'resolving';
+          this.resolveTimer = setTimeout(() => {
+            this.resolveTimer = null;
+            this.gestureState = 'idle';
+            this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'single_press', button });
+          }, DOUBLE_PRESS_WINDOW_MS);
+        }
       } else {
         this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'hold', button });
       }
@@ -76,15 +81,26 @@ export class TriggerEngine {
     private readonly haClient: HAClient,
     private readonly onMatch: (automation: Automation<unknown>, event: TriggerEvent) => void,
   ) {
+    // Collect all gestures declared per button entity so each handler knows
+    // whether to open a double-press window. Entities with no double_press
+    // trigger fire single_press immediately with no latency.
+    const entityGestures = new Map<string, Set<string>>();
     for (const automation of automations) {
       for (const trigger of automation.triggers) {
-        if (trigger.type === 'button' && !this.buttonHandlers.has(trigger.entity)) {
-          this.buttonHandlers.set(
-            trigger.entity,
-            new ButtonGestureHandler(trigger.entity, (e) => this.dispatch(e)),
-          );
+        if (trigger.type === 'button') {
+          if (!entityGestures.has(trigger.entity)) {
+            entityGestures.set(trigger.entity, new Set());
+          }
+          entityGestures.get(trigger.entity)!.add(trigger.gesture);
         }
       }
+    }
+
+    for (const [entity, gestures] of entityGestures) {
+      this.buttonHandlers.set(
+        entity,
+        new ButtonGestureHandler(entity, (e) => this.dispatch(e), gestures.has('double_press')),
+      );
     }
   }
 
