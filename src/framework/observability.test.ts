@@ -5,8 +5,14 @@ import type { MqttClient } from 'mqtt';
 
 // ---------- Helpers ----------
 
-function makeMqtt(): { publishAsync: ReturnType<typeof vi.fn> } & Pick<MqttClient, 'publishAsync'> {
+type MockMqtt = { publishAsync: ReturnType<typeof vi.fn> };
+
+function makeMqtt(): MockMqtt {
   return { publishAsync: vi.fn().mockResolvedValue(undefined) };
+}
+
+function callForTopic(mqtt: MockMqtt, topic: string): unknown[] | undefined {
+  return mqtt.publishAsync.mock.calls.find((c: unknown[]) => c[0] === topic);
 }
 
 function makeDecisionEvent(overrides: Partial<ObsEvent> = {}): ObsEvent {
@@ -27,7 +33,7 @@ function makeDecisionEvent(overrides: Partial<ObsEvent> = {}): ObsEvent {
 // ---------- Tests ----------
 
 describe('Observability — publishDecision', () => {
-  let mqtt: ReturnType<typeof makeMqtt>;
+  let mqtt: MockMqtt;
   let obs: Observability;
 
   beforeEach(() => {
@@ -36,61 +42,49 @@ describe('Observability — publishDecision', () => {
   });
 
   it('publishes the event to home/events (not retained)', async () => {
-    const event = makeDecisionEvent();
-    obs.publishDecision(event);
+    obs.publishDecision(makeDecisionEvent());
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalled());
 
-    const [topic, , opts] = mqtt.publishAsync.mock.calls.find(
-      ([t]: [string]) => t === 'home/events',
-    )!;
-    expect(topic).toBe('home/events');
-    expect(opts).toMatchObject({ retain: false });
-    const payload = JSON.parse(mqtt.publishAsync.mock.calls.find(([t]: [string]) => t === 'home/events')![1] as string);
-    expect(payload).toMatchObject({ schema: 'home.events.v1', type: 'decision', location: 'parlour' });
+    const call = callForTopic(mqtt, 'home/events')!;
+    expect(call[0]).toBe('home/events');
+    expect(call[2]).toMatchObject({ retain: false });
+    expect(JSON.parse(call[1] as string)).toMatchObject({ schema: 'home.events.v1', type: 'decision', location: 'parlour' });
   });
 
   it('publishes the event retained to {location}/{subsystem}/decision', async () => {
-    const event = makeDecisionEvent();
-    obs.publishDecision(event);
+    obs.publishDecision(makeDecisionEvent());
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalledTimes(2));
 
-    const retainedCall = mqtt.publishAsync.mock.calls.find(
-      ([t]: [string]) => t === 'parlour/lighting/decision',
-    );
-    expect(retainedCall).toBeDefined();
-    expect(retainedCall![2]).toMatchObject({ retain: true });
+    const call = callForTopic(mqtt, 'parlour/lighting/decision');
+    expect(call).toBeDefined();
+    expect(call![2]).toMatchObject({ retain: true });
   });
 
   it('publishes the correct schema version on the retained topic', async () => {
     obs.publishDecision(makeDecisionEvent());
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalledTimes(2));
 
-    const retainedCall = mqtt.publishAsync.mock.calls.find(
-      ([t]: [string]) => t === 'parlour/lighting/decision',
-    )!;
-    const payload = JSON.parse(retainedCall[1] as string);
-    expect(payload.schema).toBe('home.events.v1');
+    const call = callForTopic(mqtt, 'parlour/lighting/decision')!;
+    expect(JSON.parse(call[1] as string).schema).toBe('home.events.v1');
   });
 
   it('includes dry_run: true when set on the event', async () => {
     obs.publishDecision(makeDecisionEvent({ dry_run: true }));
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalled());
 
-    const call = mqtt.publishAsync.mock.calls.find(([t]: [string]) => t === 'home/events')!;
-    const payload = JSON.parse(call[1] as string);
-    expect(payload.dry_run).toBe(true);
+    const call = callForTopic(mqtt, 'home/events')!;
+    expect(JSON.parse(call[1] as string).dry_run).toBe(true);
   });
 
   it('swallows MQTT publish failure and does not throw', async () => {
     mqtt.publishAsync.mockRejectedValue(new Error('connection lost'));
     expect(() => obs.publishDecision(makeDecisionEvent())).not.toThrow();
-    // give the promise time to reject
     await new Promise((r) => setTimeout(r, 0));
   });
 });
 
 describe('Observability — publishActionEvent', () => {
-  let mqtt: ReturnType<typeof makeMqtt>;
+  let mqtt: MockMqtt;
   let obs: Observability;
 
   beforeEach(() => {
@@ -99,11 +93,10 @@ describe('Observability — publishActionEvent', () => {
   });
 
   it('publishes an abort event to home/events with type: abort', async () => {
-    const event = makeDecisionEvent({ type: 'abort', reason: 'guard_failed' });
-    obs.publishActionEvent(event);
+    obs.publishActionEvent(makeDecisionEvent({ type: 'abort', reason: 'guard_failed' }));
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalled());
 
-    const call = mqtt.publishAsync.mock.calls.find(([t]: [string]) => t === 'home/events')!;
+    const call = callForTopic(mqtt, 'home/events')!;
     const payload = JSON.parse(call[1] as string);
     expect(payload.type).toBe('abort');
     expect(payload.reason).toBe('guard_failed');
@@ -113,10 +106,7 @@ describe('Observability — publishActionEvent', () => {
     obs.publishActionEvent(makeDecisionEvent({ type: 'action_started' }));
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalled());
 
-    const retainedCall = mqtt.publishAsync.mock.calls.find(
-      ([t]: [string]) => t === 'parlour/lighting/decision',
-    );
-    expect(retainedCall).toBeUndefined();
+    expect(callForTopic(mqtt, 'parlour/lighting/decision')).toBeUndefined();
   });
 
   it('swallows MQTT publish failure and does not throw', async () => {
