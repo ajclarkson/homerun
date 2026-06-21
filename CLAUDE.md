@@ -129,8 +129,8 @@ it('returns no_action when disabled', () => {
 
 - [x] HA WebSocket connection established
 - [x] State cache populating (1438 entities)
-- [ ] State cache as stable module-level map
-- [ ] Entity registry load (labels)
+- [x] State cache as stable in-memory map in `src/framework/ha-client.ts` — `HAClient` with `state`, `context`, reconnect handling
+- [x] Entity registry load (labels) — `config/entity_registry/list`, reloaded on reconnect
 - [ ] Trigger Engine
 - [ ] Pipeline Runner
 - [ ] Action Runtime (with dry-run)
