@@ -18,17 +18,20 @@ If you find yourself wanting to reference specific entities or rooms while worki
 
 ## Architecture
 
-The framework has six core components:
+The framework has seven core components:
 
 | Module | File | Responsibility |
 |--------|------|----------------|
 | HA Client | `src/framework/ha-client.ts` | WebSocket connection, state cache, entity registry |
-| Trigger Engine | `src/framework/trigger-engine.ts` | Event routing, debounce, button gesture recognition, timer loopback |
+| Trigger Engine | `src/framework/trigger-engine.ts` | Pure event router — matches events to automations, button gesture recognition |
+| Scheduler | `src/framework/scheduler.ts` | Cron jobs (`schedule`) and `on_start` — event source that feeds `dispatch()` |
+| Timer Manager | `src/framework/timer-manager.ts` | Named timers — event source that feeds `dispatch()` on expiry |
 | Pipeline Runner | `src/framework/pipeline.ts` | 5-step pipeline: correlate → context → reduce → validate → fanout |
 | Action Runtime | `src/framework/action-runtime.ts` | Declarative action execution with observability events |
-| Timer Manager | `src/framework/timer-manager.ts` | Named timers, expiry loopback into Trigger Engine |
 | Observability | `src/framework/observability.ts` | MQTT event + snapshot publisher |
 | Registry | `src/framework/registry.ts` | Automation registration, hot reload |
+
+**Event source pattern:** Scheduler and TimerManager are independent event sources — they have no dependency on HAClient and generate events from time/timers. Both call `TriggerEngine.dispatch()`. TriggerEngine is a pure router with zero self-generated events.
 
 Full design intent is documented externally. This CLAUDE.md covers what you need to work in this codebase.
 
@@ -55,11 +58,13 @@ interface Automation<C> {
 type Trigger =
   | { type: 'state_changed'; entity: string | RegExp }
   | { type: 'schedule'; cron: string }
-  | { type: 'on_start'; delayMs?: number }
+  | { type: 'on_start' }
   | { type: 'timer_expired'; timerKey: string }
   | { type: 'button'; entity: string; gesture: 'single_press' | 'double_press' | 'hold'; button?: string }
   | { type: 'mqtt_in'; topic: string };
 ```
+
+`on_start` fires once when the system is ready and the state cache is populated. It has no `delayMs` — if startup work needs to be deferred, emit a `timer.start` action from the reducer and handle `timer_expired` instead.
 
 ## Action types
 
