@@ -4,10 +4,11 @@
       "module": "NodeNext",
       "moduleResolution": "NodeNext",
       "outDir": "./dist",
-      "rootDir": "./src",
+      "rootDir": ".",
       "strict": true,
       "esModuleInterop": true,
       "types": ["node"]
     },
-    "include": ["src/**/*"]
+    "include": ["src/**/*", "scripts/**/*"],
+    "exclude": ["src/**/*.test.ts", "scripts/**/*.test.ts"]
   }

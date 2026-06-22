@@ -8,7 +8,12 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "test": "vitest",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "generate:ha-types": "tsx scripts/generate-ha-types.ts",
+    "generate:ha-types:compiled": "homerun-generate-ha-types"
+  },
+  "bin": {
+    "homerun-generate-ha-types": "./dist/scripts/generate-ha-types.js"
   },
   "keywords": [],
   "author": "",
