@@ -53,7 +53,7 @@ async function connectClient() {
 
 async function connectAndInitialise(
   entities: Record<string, ReturnType<typeof makeEntity>> = {},
-  registryEntries: Array<{ entity_id: string; labels?: string[] }> = [],
+  registryEntries: Array<{ entity_id: string; labels?: string[]; area_id?: string }> = [],
 ) {
   (mockConnection.sendMessagePromise as Mock).mockResolvedValueOnce(registryEntries);
   const { client, connectPromise } = await connectClient();
@@ -385,6 +385,57 @@ describe('HAClient', () => {
       expect(client.context.labelsFor('light.a')).toEqual(['new_label']);
       expect(client.context.entitiesByLabel('old_label')).toEqual([]);
       expect(client.context.entitiesByLabel('new_label')).toEqual(['light.a']);
+    });
+  });
+
+  describe('entity registry / areas', () => {
+    it('returns entities for an area', async () => {
+      const { client } = await connectAndInitialise({}, [
+        { entity_id: 'light.parlour_ceiling', area_id: 'parlour' },
+        { entity_id: 'light.parlour_floor_lamp', area_id: 'parlour' },
+        { entity_id: 'light.kitchen_ceiling', area_id: 'kitchen' },
+      ]);
+
+      expect(client.context.entitiesByArea('parlour').sort()).toEqual([
+        'light.parlour_ceiling',
+        'light.parlour_floor_lamp',
+      ]);
+    });
+
+    it('returns empty array for unknown area', async () => {
+      const { client } = await connectAndInitialise({}, []);
+      expect(client.context.entitiesByArea('no_such_area')).toEqual([]);
+    });
+
+    it('ignores entities with no area_id', async () => {
+      const { client } = await connectAndInitialise({}, [
+        { entity_id: 'light.no_area' },
+        { entity_id: 'light.parlour_ceiling', area_id: 'parlour' },
+      ]);
+
+      expect(client.context.entitiesByArea('parlour')).toEqual(['light.parlour_ceiling']);
+    });
+
+    it('reloads area map on reconnect', async () => {
+      (mockConnection.sendMessagePromise as Mock)
+        .mockResolvedValueOnce([
+          { entity_id: 'light.a', area_id: 'old_room' },
+        ])
+        .mockResolvedValueOnce([
+          { entity_id: 'light.a', area_id: 'new_room' },
+        ]);
+
+      const { client } = await connectClient();
+      capturedSubscribeCallback!(snapshot({ 'light.a': makeEntity('on', 'T1') }));
+      await client.ready;
+
+      capturedDisconnectListener!();
+      capturedSubscribeCallback!(snapshot({ 'light.a': makeEntity('on', 'T2') }));
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(client.context.entitiesByArea('old_room')).toEqual([]);
+      expect(client.context.entitiesByArea('new_room')).toEqual(['light.a']);
     });
   });
 });
