@@ -77,7 +77,22 @@ describe('Scheduler', () => {
     cronCallbackFor()();
 
     expect(dispatch).toHaveBeenCalledOnce();
-    expect(dispatch).toHaveBeenCalledWith({ type: 'schedule', cron: '0 8 * * *' });
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'schedule', cron: '0 8 * * *' }));
+  });
+
+  it('mints a correlation_id on each schedule dispatch', () => {
+    const dispatch = vi.fn<(e: TriggerEvent) => void>();
+    const automation = makeAutomation('a', '0 8 * * *');
+    const scheduler = new Scheduler([automation], dispatch, Promise.resolve());
+    scheduler.start();
+
+    cronCallbackFor()();
+    cronCallbackFor()();
+
+    const ids = dispatch.mock.calls.map(([e]) => (e as TriggerEvent & { correlation_id: string }).correlation_id);
+    expect(ids[0]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(ids[1]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(ids[0]).not.toBe(ids[1]);
   });
 
   it('dispatches to the correct expression when multiple jobs are registered', () => {
@@ -89,8 +104,8 @@ describe('Scheduler', () => {
 
     cronCallbackFor(1)(); // fire second job
 
-    expect(dispatch).toHaveBeenCalledWith({ type: 'schedule', cron: '0 22 * * *' });
-    expect(dispatch).not.toHaveBeenCalledWith({ type: 'schedule', cron: '0 8 * * *' });
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'schedule', cron: '0 22 * * *' }));
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'schedule', cron: '0 8 * * *' }));
   });
 
   it('does not register cron jobs for non-schedule triggers', () => {
@@ -141,7 +156,20 @@ describe('Scheduler — on_start', () => {
     await vi.runAllTimersAsync();
 
     expect(dispatch).toHaveBeenCalledOnce();
-    expect(dispatch).toHaveBeenCalledWith({ type: 'on_start' });
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'on_start' }));
+  });
+
+  it('mints a correlation_id on on_start dispatch', async () => {
+    const dispatch = vi.fn<(e: TriggerEvent) => void>();
+    const { ready, resolveReady } = makeReadyPromise();
+    const scheduler = new Scheduler([], dispatch, ready);
+    scheduler.start();
+
+    resolveReady();
+    await vi.runAllTimersAsync();
+
+    const [event] = dispatch.mock.calls[0] as [TriggerEvent & { correlation_id: string }];
+    expect(event.correlation_id).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it('does not dispatch on_start before ready resolves', () => {
@@ -166,6 +194,6 @@ describe('Scheduler — on_start', () => {
 
     // Scheduler dispatches on_start unconditionally — TriggerEngine routes it
     // only to automations that declare an on_start trigger.
-    expect(dispatch).toHaveBeenCalledWith({ type: 'on_start' });
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'on_start' }));
   });
 });

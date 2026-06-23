@@ -93,6 +93,7 @@ describe('TriggerEngine', () => {
         entity_id: 'light.kitchen',
         old_state: makeEntityState('off', 'light.kitchen'),
         new_state: makeEntityState('on', 'light.kitchen'),
+        correlation_id: 'test-cid',
       });
 
       expect(onMatch).toHaveBeenCalledOnce();
@@ -113,6 +114,7 @@ describe('TriggerEngine', () => {
         entity_id: 'sensor.kitchen_temperature',
         old_state: undefined,
         new_state: makeEntityState('21', 'sensor.kitchen_temperature'),
+        correlation_id: 'test-cid',
       });
 
       expect(onMatch).toHaveBeenCalledOnce();
@@ -132,6 +134,7 @@ describe('TriggerEngine', () => {
         entity_id: 'light.bedroom',
         old_state: undefined,
         new_state: makeEntityState('on', 'light.bedroom'),
+        correlation_id: 'test-cid',
       });
 
       expect(onMatch).not.toHaveBeenCalled();
@@ -150,6 +153,7 @@ describe('TriggerEngine', () => {
         entity_id: 'light.kitchen',
         old_state: undefined,
         new_state: makeEntityState('on', 'light.kitchen'),
+        correlation_id: 'test-cid',
       });
 
       expect(onMatch).not.toHaveBeenCalled();
@@ -173,6 +177,7 @@ describe('TriggerEngine', () => {
         entity_id: 'light.kitchen',
         old_state: undefined,
         new_state: makeEntityState('on', 'light.kitchen'),
+        correlation_id: 'test-cid',
       });
 
       expect(onMatch).toHaveBeenCalledOnce();
@@ -188,10 +193,10 @@ describe('TriggerEngine', () => {
       const automation = makeAutomation('a', [{ type: 'on_start' }]);
 
       const engine = new TriggerEngine([automation], client, onMatch);
-      engine.dispatch({ type: 'on_start' });
+      engine.dispatch({ type: 'on_start', correlation_id: 'test-cid' });
 
       expect(onMatch).toHaveBeenCalledOnce();
-      expect(onMatch).toHaveBeenCalledWith(automation, { type: 'on_start' });
+      expect(onMatch).toHaveBeenCalledWith(automation, expect.objectContaining({ type: 'on_start' }));
     });
   });
 
@@ -204,10 +209,10 @@ describe('TriggerEngine', () => {
       const automation = makeAutomation('a', [{ type: 'timer_expired', timerKey: 'kitchen:lights:off-delay' }]);
 
       const engine = new TriggerEngine([automation], client, onMatch);
-      engine.dispatch({ type: 'timer_expired', timerKey: 'kitchen:lights:off-delay' });
+      engine.dispatch({ type: 'timer_expired', timerKey: 'kitchen:lights:off-delay', correlation_id: 'test-cid' });
 
       expect(onMatch).toHaveBeenCalledOnce();
-      expect(onMatch).toHaveBeenCalledWith(automation, { type: 'timer_expired', timerKey: 'kitchen:lights:off-delay' });
+      expect(onMatch).toHaveBeenCalledWith(automation, expect.objectContaining({ type: 'timer_expired', timerKey: 'kitchen:lights:off-delay' }));
     });
 
     it('does not route for a different timerKey', () => {
@@ -216,7 +221,7 @@ describe('TriggerEngine', () => {
       const automation = makeAutomation('a', [{ type: 'timer_expired', timerKey: 'kitchen:lights:off-delay' }]);
 
       const engine = new TriggerEngine([automation], client, onMatch);
-      engine.dispatch({ type: 'timer_expired', timerKey: 'parlour:lights:off-delay' });
+      engine.dispatch({ type: 'timer_expired', timerKey: 'parlour:lights:off-delay', correlation_id: 'test-cid' });
 
       expect(onMatch).not.toHaveBeenCalled();
     });
@@ -243,7 +248,7 @@ describe('TriggerEngine', () => {
     }
 
     function press(emitStateChanged: ReturnType<typeof makeMockHAClient>['emitStateChanged'], entity = 'sensor.button', state = 'short_press') {
-      emitStateChanged({ entity_id: entity, old_state: undefined, new_state: makeEntityState(state, entity) });
+      emitStateChanged({ entity_id: entity, old_state: undefined, new_state: makeEntityState(state, entity), correlation_id: 'test-cid' });
     }
 
     it('resolves single press after 400ms window', async () => {

@@ -15,7 +15,30 @@ describe('TimerManager', () => {
 
     vi.advanceTimersByTime(5000);
     expect(dispatch).toHaveBeenCalledOnce();
-    expect(dispatch).toHaveBeenCalledWith({ type: 'timer_expired', timerKey: 'parlour:lighting:off-delay' });
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'timer_expired', timerKey: 'parlour:lighting:off-delay' }));
+  });
+
+  it('mints a correlation_id on timer_expired dispatch', () => {
+    const dispatch = vi.fn<(e: TriggerEvent) => void>();
+    const tm = new TimerManager(dispatch);
+
+    tm.start('parlour:lighting:off-delay', 5000);
+    vi.advanceTimersByTime(5000);
+
+    const [event] = dispatch.mock.calls[0] as [TriggerEvent & { correlation_id: string }];
+    expect(event.correlation_id).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it('each timer expiry mints a fresh correlation_id', () => {
+    const dispatch = vi.fn<(e: TriggerEvent) => void>();
+    const tm = new TimerManager(dispatch);
+
+    tm.start('room:a', 1000);
+    tm.start('room:b', 1000);
+    vi.advanceTimersByTime(1000);
+
+    const ids = dispatch.mock.calls.map(([e]) => (e as TriggerEvent & { correlation_id: string }).correlation_id);
+    expect(ids[0]).not.toBe(ids[1]);
   });
 
   it('starting a second timer on the same key cancels the first — only one expiry fires', () => {
@@ -29,7 +52,7 @@ describe('TimerManager', () => {
     vi.advanceTimersByTime(5000);
 
     expect(dispatch).toHaveBeenCalledOnce();
-    expect(dispatch).toHaveBeenCalledWith({ type: 'timer_expired', timerKey: 'room:sub:purpose' });
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'timer_expired', timerKey: 'room:sub:purpose' }));
   });
 
   it('cancel prevents dispatch from firing', () => {
@@ -58,6 +81,6 @@ describe('TimerManager', () => {
     vi.advanceTimersByTime(5000);
 
     expect(dispatch).toHaveBeenCalledOnce();
-    expect(dispatch).toHaveBeenCalledWith({ type: 'timer_expired', timerKey: 'room:heating:off' });
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'timer_expired', timerKey: 'room:heating:off' }));
   });
 });

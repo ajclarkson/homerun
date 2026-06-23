@@ -31,6 +31,7 @@ export interface StateChangedEvent {
   entity_id: string;
   old_state: EntityState | undefined;
   new_state: EntityState;
+  correlation_id: string;
 }
 
 // ---------- Internal types ----------
@@ -139,7 +140,7 @@ export class HAClient extends EventEmitter {
       // last_updated changes whenever state or attributes change in HA.
       if (!old_state || old_state.last_updated !== new_state.last_updated) {
         this.stateCache.set(id, new_state);
-        this.emit('state_changed', { entity_id: id, old_state, new_state });
+        this.emit('state_changed', { entity_id: id, old_state, new_state, correlation_id: crypto.randomUUID() });
       }
     }
 

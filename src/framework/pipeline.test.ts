@@ -32,7 +32,7 @@ function makeAutomation(overrides: Partial<Automation<unknown>> = {}): Automatio
   };
 }
 
-const onStartEvent: TriggerEvent = { type: 'on_start' };
+const onStartEvent: TriggerEvent = { type: 'on_start', correlation_id: 'test-cid-pipeline' };
 
 // ---------- Happy path ----------
 
@@ -77,11 +77,11 @@ describe('runPipeline — happy path', () => {
     expect(deps.actionRuntime.execute).toHaveBeenCalledWith(actions, expect.objectContaining({ correlationId: expect.any(String) }));
   });
 
-  it('correlation_id is a non-empty string present on the ObsEvent', async () => {
-    await runPipeline(auto, onStartEvent, ha as never, deps as never);
-    const [event] = deps.observability.publishDecision.mock.calls[0] as [Record<string, unknown>];
-    expect(typeof event.correlation_id).toBe('string');
-    expect((event.correlation_id as string).length).toBeGreaterThan(0);
+  it('uses the correlation_id from the event, not a generated one', async () => {
+    const event: TriggerEvent = { type: 'on_start', correlation_id: 'fixed-id-abc' };
+    await runPipeline(auto, event, ha as never, deps as never);
+    const [obsEvent] = deps.observability.publishDecision.mock.calls[0] as [Record<string, unknown>];
+    expect(obsEvent.correlation_id).toBe('fixed-id-abc');
   });
 
   it('correlation_id on ObsEvent matches the one passed to actionRuntime', async () => {

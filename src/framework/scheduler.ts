@@ -17,7 +17,7 @@ export class Scheduler {
         if (trigger.type === 'schedule') {
           const { cron: expression } = trigger;
           const task = cron.schedule(expression, () => {
-            this.dispatch({ type: 'schedule', cron: expression });
+            this.dispatch({ type: 'schedule', cron: expression, correlation_id: crypto.randomUUID() });
           });
           this.cleanups.push(() => task.stop());
         }
@@ -25,7 +25,7 @@ export class Scheduler {
     }
 
     this.ready.then(() => {
-      this.dispatch({ type: 'on_start' });
+      this.dispatch({ type: 'on_start', correlation_id: crypto.randomUUID() });
     }).catch((err) => {
       console.error('[scheduler] ready promise rejected:', err);
     });

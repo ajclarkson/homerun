@@ -16,7 +16,7 @@ export async function runPipeline(
   haClient: HAClient,
   deps: Deps,
 ): Promise<void> {
-  const correlationId = crypto.randomUUID();
+  const correlationId = event.correlation_id;
   const timestamp = new Date().toISOString();
 
   const base: Omit<ObsEvent, 'type' | 'decision' | 'reason' | 'actions' | 'inputs'> = {
