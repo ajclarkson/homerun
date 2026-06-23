@@ -4,8 +4,12 @@
   "version": "1.0.0",
   "description": "",
   "main": "./dist/src/lib.js",
+  "types": "./dist/src/lib.d.ts",
   "exports": {
-    ".": "./dist/src/lib.js"
+    ".": {
+      "types": "./dist/src/lib.d.ts",
+      "default": "./dist/src/lib.js"
+    }
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
