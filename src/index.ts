@@ -46,7 +46,7 @@ const actionRuntime = new ActionRuntime({
 const automationsDir = path.resolve(process.env.AUTOMATIONS_DIR!);
 let files: string[] = [];
 try {
-  files = await readdir(automationsDir);
+  files = (await readdir(automationsDir, { recursive: true })) as string[];
 } catch {
   console.warn(`[homerun] AUTOMATIONS_DIR not found: ${automationsDir} — starting with no automations`);
 }
