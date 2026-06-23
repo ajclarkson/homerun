@@ -25,6 +25,7 @@ export type HAState = (entity: string) => EntityState | undefined;
 export interface HAContext {
   entitiesByLabel: (label: string) => string[];
   labelsFor: (entity: string) => string[];
+  entitiesByArea: (area: string) => string[];
 }
 
 export interface StateChangedEvent {
@@ -39,6 +40,7 @@ export interface StateChangedEvent {
 interface EntityRegistryEntry {
   entity_id: string;
   labels?: string[];
+  area_id?: string | null;
 }
 
 // ---------- Typed EventEmitter overloads ----------
@@ -56,6 +58,7 @@ export class HAClient extends EventEmitter {
   private readonly stateCache = new Map<string, EntityState>();
   private readonly labelToEntities = new Map<string, Set<string>>();
   private readonly entityToLabels = new Map<string, string[]>();
+  private readonly areaToEntities = new Map<string, Set<string>>();
 
   private connection: Connection | null = null;
 
@@ -74,6 +77,7 @@ export class HAClient extends EventEmitter {
   readonly context: HAContext = {
     entitiesByLabel: (label) => Array.from(this.labelToEntities.get(label) ?? []),
     labelsFor: (entity) => this.entityToLabels.get(entity) ?? [],
+    entitiesByArea: (area) => Array.from(this.areaToEntities.get(area) ?? []),
   };
 
   get entityCount(): number {
@@ -161,6 +165,7 @@ export class HAClient extends EventEmitter {
 
     this.labelToEntities.clear();
     this.entityToLabels.clear();
+    this.areaToEntities.clear();
 
     for (const entry of entries) {
       const labels = entry.labels ?? [];
@@ -170,6 +175,15 @@ export class HAClient extends EventEmitter {
         if (!set) {
           set = new Set();
           this.labelToEntities.set(label, set);
+        }
+        set.add(entry.entity_id);
+      }
+
+      if (entry.area_id) {
+        let set = this.areaToEntities.get(entry.area_id);
+        if (!set) {
+          set = new Set();
+          this.areaToEntities.set(entry.area_id, set);
         }
         set.add(entry.entity_id);
       }
