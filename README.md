@@ -257,4 +257,4 @@ TimerManager (setTimeout)  ──────►        │
 
 ## License
 
-ISC
+MIT
