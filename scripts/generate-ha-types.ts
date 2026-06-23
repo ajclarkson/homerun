@@ -103,7 +103,7 @@ async function main(): Promise<void> {
   console.log(`Written ${states.length} entities to ${outPath}`);
 }
 
-if (process.argv[1]?.endsWith('generate-ha-types.ts') || process.argv[1]?.endsWith('generate-ha-types.js')) {
+if (process.argv[1]?.endsWith('generate-ha-types.ts') || process.argv[1]?.endsWith('generate-ha-types.js') || process.argv[1]?.endsWith('homerun-generate-ha-types')) {
   main().catch((err: unknown) => {
     console.error('Fatal:', err);
     process.exit(1);
