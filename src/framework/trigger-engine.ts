@@ -1,6 +1,7 @@
 import type { Automation } from '../types/automation.js';
 import type { Trigger, TriggerEvent } from '../types/triggers.js';
 import type { HAClient, StateChangedEvent } from './ha-client.js';
+import type { AutomationRegistry } from './registry.js';
 
 const DOUBLE_PRESS_WINDOW_MS = 400;
 
@@ -77,15 +78,15 @@ export class TriggerEngine {
   private readonly buttonHandlers = new Map<string, ButtonGestureHandler>();
 
   constructor(
-    private readonly automations: Automation<unknown>[],
+    private readonly registry: AutomationRegistry,
     private readonly haClient: HAClient,
     private readonly onMatch: (automation: Automation<unknown>, event: TriggerEvent) => void,
   ) {
-    // Collect all gestures declared per button entity so each handler knows
-    // whether to open a double-press window. Entities with no double_press
-    // trigger fire single_press immediately with no latency.
+    // Button handlers are built from the automation snapshot at construction time.
+    // The double-press window config per entity is stable — reloading an automation
+    // that changes its button trigger gestures requires a restart to take effect.
     const entityGestures = new Map<string, Set<string>>();
-    for (const automation of automations) {
+    for (const automation of registry.getAll()) {
       for (const trigger of automation.triggers) {
         if (trigger.type === 'button') {
           if (!entityGestures.has(trigger.entity)) {
@@ -135,7 +136,7 @@ export class TriggerEngine {
   // ---------- Private ----------
 
   private matchAndFire(event: TriggerEvent): void {
-    for (const automation of this.automations) {
+    for (const automation of this.registry.getAll()) {
       for (const trigger of automation.triggers) {
         if (matchesTrigger(trigger, event)) {
           this.onMatch(automation, event);

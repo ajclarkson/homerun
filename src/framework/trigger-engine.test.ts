@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { TriggerEngine, parseButtonAction } from './trigger-engine.js';
+import { AutomationRegistry } from './registry.js';
 import type { Automation } from '../types/automation.js';
 import type { TriggerEvent } from '../types/triggers.js';
 import type { HAClient, EntityState, StateChangedEvent } from './ha-client.js';
@@ -23,6 +24,12 @@ function makeAutomation(
     context: () => ({}),
     reduce: () => ({ decision: 'ok', actions: [] }),
   };
+}
+
+function makeRegistry(...automations: Automation<unknown>[]): AutomationRegistry {
+  const registry = new AutomationRegistry();
+  for (const a of automations) registry.register(a);
+  return registry;
 }
 
 // Minimal HAClient mock: real EventEmitter + manually resolvable ready promise.
@@ -84,7 +91,7 @@ describe('TriggerEngine', () => {
       const onMatch = vi.fn();
       const automation = makeAutomation('a', [{ type: 'state_changed', entity: 'light.kitchen' }]);
 
-      const engine = new TriggerEngine([automation], client, onMatch);
+      const engine = new TriggerEngine(makeRegistry(automation), client, onMatch);
       engine.start();
       resolveReady();
       await vi.runAllTimersAsync();
@@ -105,7 +112,7 @@ describe('TriggerEngine', () => {
       const onMatch = vi.fn();
       const automation = makeAutomation('a', [{ type: 'state_changed', entity: /^sensor\..*_temperature$/ }]);
 
-      const engine = new TriggerEngine([automation], client, onMatch);
+      const engine = new TriggerEngine(makeRegistry(automation), client, onMatch);
       engine.start();
       resolveReady();
       await vi.runAllTimersAsync();
@@ -125,7 +132,7 @@ describe('TriggerEngine', () => {
       const onMatch = vi.fn();
       const automation = makeAutomation('a', [{ type: 'state_changed', entity: 'light.kitchen' }]);
 
-      const engine = new TriggerEngine([automation], client, onMatch);
+      const engine = new TriggerEngine(makeRegistry(automation), client, onMatch);
       engine.start();
       resolveReady();
       await vi.runAllTimersAsync();
@@ -145,7 +152,7 @@ describe('TriggerEngine', () => {
       const onMatch = vi.fn();
       const automation = makeAutomation('a', [{ type: 'state_changed', entity: 'light.kitchen' }]);
 
-      const engine = new TriggerEngine([automation], client, onMatch);
+      const engine = new TriggerEngine(makeRegistry(automation), client, onMatch);
       engine.start();
       // Do NOT resolve ready — listener not wired yet.
 
@@ -168,7 +175,7 @@ describe('TriggerEngine', () => {
         { type: 'state_changed', entity: /^light\./ },
       ]);
 
-      const engine = new TriggerEngine([automation], client, onMatch);
+      const engine = new TriggerEngine(makeRegistry(automation), client, onMatch);
       engine.start();
       resolveReady();
       await vi.runAllTimersAsync();
@@ -192,7 +199,7 @@ describe('TriggerEngine', () => {
       const onMatch = vi.fn();
       const automation = makeAutomation('a', [{ type: 'on_start' }]);
 
-      const engine = new TriggerEngine([automation], client, onMatch);
+      const engine = new TriggerEngine(makeRegistry(automation), client, onMatch);
       engine.dispatch({ type: 'on_start', correlation_id: 'test-cid' });
 
       expect(onMatch).toHaveBeenCalledOnce();
@@ -208,7 +215,7 @@ describe('TriggerEngine', () => {
       const onMatch = vi.fn();
       const automation = makeAutomation('a', [{ type: 'timer_expired', timerKey: 'kitchen:lights:off-delay' }]);
 
-      const engine = new TriggerEngine([automation], client, onMatch);
+      const engine = new TriggerEngine(makeRegistry(automation), client, onMatch);
       engine.dispatch({ type: 'timer_expired', timerKey: 'kitchen:lights:off-delay', correlation_id: 'test-cid' });
 
       expect(onMatch).toHaveBeenCalledOnce();
@@ -220,7 +227,7 @@ describe('TriggerEngine', () => {
       const onMatch = vi.fn();
       const automation = makeAutomation('a', [{ type: 'timer_expired', timerKey: 'kitchen:lights:off-delay' }]);
 
-      const engine = new TriggerEngine([automation], client, onMatch);
+      const engine = new TriggerEngine(makeRegistry(automation), client, onMatch);
       engine.dispatch({ type: 'timer_expired', timerKey: 'parlour:lights:off-delay', correlation_id: 'test-cid' });
 
       expect(onMatch).not.toHaveBeenCalled();
@@ -239,12 +246,12 @@ describe('TriggerEngine', () => {
         { type: 'button', entity, gesture: 'hold' },
       ]);
 
-      const engine = new TriggerEngine([automation], client, onMatch);
+      const engine = new TriggerEngine(makeRegistry(automation), client, onMatch);
       engine.start();
       resolveReady();
       await vi.runAllTimersAsync();
 
-      return { onMatch, emitStateChanged, automation };
+      return { onMatch, emitStateChanged, client, automation };
     }
 
     function press(emitStateChanged: ReturnType<typeof makeMockHAClient>['emitStateChanged'], entity = 'sensor.button', state = 'short_press') {
@@ -318,7 +325,7 @@ describe('TriggerEngine', () => {
         { type: 'button', entity: 'sensor.button_b', gesture: 'double_press' },
       ]);
 
-      const engine = new TriggerEngine([a1, a2], client, onMatch);
+      const engine = new TriggerEngine(makeRegistry(a1, a2), client, onMatch);
       engine.start();
       resolveReady();
       await vi.runAllTimersAsync();
@@ -346,7 +353,7 @@ describe('TriggerEngine', () => {
         // no double_press — single_press should fire without waiting
       ]);
 
-      const engine = new TriggerEngine([automation], client, onMatch);
+      const engine = new TriggerEngine(makeRegistry(automation), client, onMatch);
       engine.start();
       resolveReady();
       await vi.runAllTimersAsync();
