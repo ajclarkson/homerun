@@ -115,6 +115,17 @@ These are non-negotiable — the framework runs unattended and controls physical
 | `DRY_RUN` | Set to `true` to disable action execution |
 | `AUTOMATION` | Scope hot reload to a single file (optional, dev only) |
 
+## Development workflow
+
+Work is tracked as GitHub issues. When picking up an issue:
+
+1. Pull latest `main`, then create a branch: `git checkout -b feat/issue-{N}-short-description`
+2. Write failing tests first (TDD) — add the new `it()` blocks, run the suite, confirm they fail for the right reason
+3. Implement until all tests pass
+4. Open a PR referencing the issue — the PR title should follow the existing `feat(#N): ...` convention
+
+Never commit directly to `main`.
+
 ## Testing
 
 Vitest. Reducers and context builders are plain functions — import and call them directly with mock state. No HA connection required for unit tests.
