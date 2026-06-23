@@ -21,12 +21,14 @@ export class Observability {
 
   publishDecision(event: ObsEvent): void {
     const payload = JSON.stringify(event);
-    this.publish('home/events', payload, false);
-    this.publish(`${event.location}/${event.subsystem}/decision`, payload, true);
+    const ns = event.dry_run ? 'homerun/dev' : 'homerun';
+    this.publish(`${ns}/events`, payload, false);
+    this.publish(`${ns}/${event.location}/${event.subsystem}/decision`, payload, true);
   }
 
   publishActionEvent(event: ObsEvent): void {
-    this.publish('home/events', JSON.stringify(event), false);
+    const ns = event.dry_run ? 'homerun/dev' : 'homerun';
+    this.publish(`${ns}/events`, JSON.stringify(event), false);
   }
 
   private publish(topic: string, payload: string, retain: boolean): void {

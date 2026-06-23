@@ -41,21 +41,21 @@ describe('Observability — publishDecision', () => {
     obs = new Observability(mqtt as unknown as MqttClient);
   });
 
-  it('publishes the event to home/events (not retained)', async () => {
+  it('publishes the event to homerun/events (not retained)', async () => {
     obs.publishDecision(makeDecisionEvent());
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalled());
 
-    const call = callForTopic(mqtt, 'home/events')!;
-    expect(call[0]).toBe('home/events');
+    const call = callForTopic(mqtt, 'homerun/events')!;
+    expect(call[0]).toBe('homerun/events');
     expect(call[2]).toMatchObject({ retain: false });
     expect(JSON.parse(call[1] as string)).toMatchObject({ schema: 'home.events.v1', type: 'decision', location: 'parlour' });
   });
 
-  it('publishes the event retained to {location}/{subsystem}/decision', async () => {
+  it('publishes the event retained to homerun/{location}/{subsystem}/decision', async () => {
     obs.publishDecision(makeDecisionEvent());
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalledTimes(2));
 
-    const call = callForTopic(mqtt, 'parlour/lighting/decision');
+    const call = callForTopic(mqtt, 'homerun/parlour/lighting/decision');
     expect(call).toBeDefined();
     expect(call![2]).toMatchObject({ retain: true });
   });
@@ -64,16 +64,18 @@ describe('Observability — publishDecision', () => {
     obs.publishDecision(makeDecisionEvent());
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalledTimes(2));
 
-    const call = callForTopic(mqtt, 'parlour/lighting/decision')!;
+    const call = callForTopic(mqtt, 'homerun/parlour/lighting/decision')!;
     expect(JSON.parse(call[1] as string).schema).toBe('home.events.v1');
   });
 
-  it('includes dry_run: true when set on the event', async () => {
+  it('routes dry_run events to homerun/dev/* topics', async () => {
     obs.publishDecision(makeDecisionEvent({ dry_run: true }));
-    await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalled());
+    await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalledTimes(2));
 
-    const call = callForTopic(mqtt, 'home/events')!;
-    expect(JSON.parse(call[1] as string).dry_run).toBe(true);
+    expect(callForTopic(mqtt, 'homerun/dev/events')).toBeDefined();
+    expect(callForTopic(mqtt, 'homerun/dev/parlour/lighting/decision')).toBeDefined();
+    expect(callForTopic(mqtt, 'homerun/events')).toBeUndefined();
+    expect(callForTopic(mqtt, 'homerun/parlour/lighting/decision')).toBeUndefined();
   });
 
   it('swallows MQTT publish failure and does not throw', async () => {
@@ -92,11 +94,11 @@ describe('Observability — publishActionEvent', () => {
     obs = new Observability(mqtt as unknown as MqttClient);
   });
 
-  it('publishes an abort event to home/events with type: abort', async () => {
+  it('publishes an abort event to homerun/events with type: abort', async () => {
     obs.publishActionEvent(makeDecisionEvent({ type: 'abort', reason: 'guard_failed' }));
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalled());
 
-    const call = callForTopic(mqtt, 'home/events')!;
+    const call = callForTopic(mqtt, 'homerun/events')!;
     const payload = JSON.parse(call[1] as string);
     expect(payload.type).toBe('abort');
     expect(payload.reason).toBe('guard_failed');
@@ -106,7 +108,15 @@ describe('Observability — publishActionEvent', () => {
     obs.publishActionEvent(makeDecisionEvent({ type: 'action_started' }));
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalled());
 
-    expect(callForTopic(mqtt, 'parlour/lighting/decision')).toBeUndefined();
+    expect(callForTopic(mqtt, 'homerun/parlour/lighting/decision')).toBeUndefined();
+  });
+
+  it('routes dry_run action events to homerun/dev/events', async () => {
+    obs.publishActionEvent(makeDecisionEvent({ type: 'action_started', dry_run: true }));
+    await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalled());
+
+    expect(callForTopic(mqtt, 'homerun/dev/events')).toBeDefined();
+    expect(callForTopic(mqtt, 'homerun/events')).toBeUndefined();
   });
 
   it('swallows MQTT publish failure and does not throw', async () => {
