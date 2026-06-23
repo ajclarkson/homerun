@@ -75,4 +75,5 @@ haClient.on('reconnected', () => {
 });
 
 await haClient.connect(process.env.HA_URL!, process.env.HA_TOKEN!);
+await haClient.ready;
 console.log(`[homerun] ready — ${haClient.entityCount} entities cached`);

@@ -1,12 +1,11 @@
 import path from 'node:path';
-import { readFile, writeFile, unlink } from 'node:fs/promises';
 import { watch } from 'chokidar';
-import { transform } from 'esbuild';
+import { build } from 'esbuild';
 import type { AutomationRegistry } from './registry.js';
 
-type Importer = (filePath: string) => Promise<{ default: unknown }>;
+type Importer = (dataUri: string) => Promise<{ default: unknown }>;
 
-const defaultImporter: Importer = (filePath) => import(`${filePath}?t=${Date.now()}`);
+const defaultImporter: Importer = (dataUri) => import(dataUri);
 
 export async function _reloadFile(
   filePath: string,
@@ -14,18 +13,18 @@ export async function _reloadFile(
   importer: Importer = defaultImporter,
 ): Promise<void> {
   try {
-    const source = await readFile(filePath, 'utf8');
-    const { code } = await transform(source, { loader: 'ts', format: 'esm' });
+    const result = await build({
+      entryPoints: [filePath],
+      bundle: true,
+      platform: 'node',
+      format: 'esm',
+      write: false,
+      packages: 'external',
+    });
 
-    const tmpPath = `${filePath}.${Date.now()}.mjs`;
-    await writeFile(tmpPath, code);
-
-    let mod: { default: unknown };
-    try {
-      mod = await importer(tmpPath);
-    } finally {
-      await unlink(tmpPath).catch(() => undefined);
-    }
+    const code = result.outputFiles[0].text;
+    const dataUri = `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`;
+    const mod = await importer(dataUri);
 
     if (!mod.default) {
       throw new Error(`${filePath} has no default export`);

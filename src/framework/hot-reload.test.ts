@@ -5,18 +5,13 @@ import type { Automation } from '../types/automation.js';
 
 // ---------- Module mocks (must be at top level) ----------
 
-const { mockTransform, mockWatch } = vi.hoisted(() => ({
-  mockTransform: vi.fn(),
+const { mockBuild, mockWatch } = vi.hoisted(() => ({
+  mockBuild: vi.fn(),
   mockWatch: vi.fn(),
 }));
 
-vi.mock('esbuild', () => ({ transform: mockTransform }));
+vi.mock('esbuild', () => ({ build: mockBuild }));
 vi.mock('chokidar', () => ({ watch: mockWatch }));
-vi.mock('node:fs/promises', () => ({
-  readFile: vi.fn().mockResolvedValue('export default {}'),
-  writeFile: vi.fn().mockResolvedValue(undefined),
-  unlink: vi.fn().mockResolvedValue(undefined),
-}));
 
 // ---------- Helpers ----------
 
@@ -45,11 +40,15 @@ function makeImporter(mod: unknown) {
   return vi.fn().mockResolvedValue(mod);
 }
 
+function makeBuildResult(code = 'export default {}') {
+  return { outputFiles: [{ text: code }] };
+}
+
 // ---------- Tests ----------
 
 describe('_reloadFile — happy path', () => {
   beforeEach(() => {
-    mockTransform.mockResolvedValue({ code: 'export default {}' });
+    mockBuild.mockResolvedValue(makeBuildResult());
   });
 
   it('registers the default export in the registry', async () => {
@@ -62,29 +61,34 @@ describe('_reloadFile — happy path', () => {
     expect(reg.register).toHaveBeenCalledWith(auto);
   });
 
-  it('passes the transpiled JS path to the importer', async () => {
+  it('passes a data: URI to the importer', async () => {
     const reg = makeRegistry();
     const importer = makeImporter({ default: makeAutomation() });
 
     await _reloadFile('/automations/parlour-lighting.ts', reg, importer);
 
     expect(importer).toHaveBeenCalledOnce();
-    expect(importer.mock.calls[0][0]).toContain('parlour-lighting');
+    expect(importer.mock.calls[0][0]).toMatch(/^data:text\/javascript;base64,/);
   });
 
-  it('calls esbuild.transform with loader: ts', async () => {
+  it('calls esbuild.build with bundle: true and platform: node', async () => {
     const reg = makeRegistry();
     const importer = makeImporter({ default: makeAutomation() });
 
     await _reloadFile('/automations/parlour-lighting.ts', reg, importer);
 
-    expect(mockTransform).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ loader: 'ts' }));
+    expect(mockBuild).toHaveBeenCalledWith(expect.objectContaining({
+      entryPoints: ['/automations/parlour-lighting.ts'],
+      bundle: true,
+      platform: 'node',
+      write: false,
+    }));
   });
 });
 
-describe('_reloadFile — transpile error', () => {
+describe('_reloadFile — build error', () => {
   it('keeps the previous automation and does not throw', async () => {
-    mockTransform.mockRejectedValueOnce(new Error('syntax error'));
+    mockBuild.mockRejectedValueOnce(new Error('syntax error'));
     const reg = makeRegistry();
     const existing = makeAutomation();
     reg.register(existing);
@@ -98,7 +102,7 @@ describe('_reloadFile — transpile error', () => {
 
 describe('_reloadFile — missing default export', () => {
   beforeEach(() => {
-    mockTransform.mockResolvedValue({ code: 'export const foo = 1' });
+    mockBuild.mockResolvedValue(makeBuildResult('export const foo = 1'));
   });
 
   it('keeps the previous automation and does not throw', async () => {
@@ -115,7 +119,7 @@ describe('_reloadFile — missing default export', () => {
 
 describe('_reloadFile — importer error', () => {
   beforeEach(() => {
-    mockTransform.mockResolvedValue({ code: 'export default {}' });
+    mockBuild.mockResolvedValue(makeBuildResult());
   });
 
   it('keeps the previous automation and does not throw', async () => {
