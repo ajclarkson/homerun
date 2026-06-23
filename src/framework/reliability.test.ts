@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { TriggerEngine } from './trigger-engine.js';
+import { AutomationRegistry } from './registry.js';
 import { runPipeline } from './pipeline.js';
 import type { Automation } from '../types/automation.js';
 import type { TriggerEvent } from '../types/triggers.js';
@@ -37,7 +38,9 @@ function makeHarness(automations: Automation<unknown>[]): Harness {
   const obs = { publishDecision: vi.fn(), publishActionEvent: vi.fn() };
   const actionRuntime = { execute: vi.fn().mockResolvedValue(undefined) };
 
-  const engine = new TriggerEngine(automations, haClient, (automation, event) => {
+  const registry = new AutomationRegistry();
+  for (const a of automations) registry.register(a);
+  const engine = new TriggerEngine(registry, haClient, (automation, event) => {
     runPipeline(automation, event, haClient, { observability: obs as never, actionRuntime: actionRuntime as never });
   });
   engine.start();
