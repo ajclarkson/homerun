@@ -18,7 +18,7 @@ class ButtonGestureHandler {
     private readonly supportsDoublePress: boolean,
   ) {}
 
-  handle(actionState: string): void {
+  handle(actionState: string, correlationId: string): void {
     const parsed = parseButtonAction(actionState);
     if (!parsed) return;
 
@@ -27,17 +27,17 @@ class ButtonGestureHandler {
     if (this.gestureState === 'idle') {
       if (pressType === 'short') {
         if (!this.supportsDoublePress) {
-          this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'single_press', button });
+          this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'single_press', button, correlation_id: correlationId });
         } else {
           this.gestureState = 'resolving';
           this.resolveTimer = setTimeout(() => {
             this.resolveTimer = null;
             this.gestureState = 'idle';
-            this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'single_press', button });
+            this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'single_press', button, correlation_id: correlationId });
           }, DOUBLE_PRESS_WINDOW_MS);
         }
       } else {
-        this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'hold', button });
+        this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'hold', button, correlation_id: correlationId });
       }
     } else {
       // resolving — waiting for double press
@@ -45,9 +45,9 @@ class ButtonGestureHandler {
       this.resolveTimer = null;
       this.gestureState = 'idle';
       if (pressType === 'short') {
-        this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'double_press', button });
+        this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'double_press', button, correlation_id: correlationId });
       } else {
-        this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'hold', button });
+        this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'hold', button, correlation_id: correlationId });
       }
     }
   }
@@ -110,13 +110,14 @@ export class TriggerEngine {
         this.haClient.on('state_changed', (event: StateChangedEvent) => {
           const handler = this.buttonHandlers.get(event.entity_id);
           if (handler) {
-            handler.handle(event.new_state.state);
+            handler.handle(event.new_state.state, event.correlation_id);
           } else {
             this.dispatch({
               type: 'state_changed',
               entity_id: event.entity_id,
               old_state: event.old_state,
               new_state: event.new_state,
+              correlation_id: event.correlation_id,
             });
           }
         });

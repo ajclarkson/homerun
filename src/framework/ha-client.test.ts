@@ -176,6 +176,39 @@ describe('HAClient', () => {
       expect(changes[0].new_state.state).toBe('on');
     });
 
+    it('mints a correlation_id on each state_changed event', async () => {
+      const { client } = await connectAndInitialise({
+        'light.kitchen': makeEntity('on', '2024-01-01T00:00:00Z'),
+      });
+
+      const changes: StateChangedEvent[] = [];
+      client.on('state_changed', (e) => changes.push(e));
+
+      capturedSubscribeCallback!(snapshot({
+        'light.kitchen': makeEntity('off', '2024-01-01T00:01:00Z'),
+      }));
+
+      expect((changes[0] as StateChangedEvent & { correlation_id: string }).correlation_id).toMatch(/^[0-9a-f-]{36}$/);
+    });
+
+    it('mints a different correlation_id for each state_changed event', async () => {
+      const { client } = await connectAndInitialise({
+        'light.a': makeEntity('on', 'T1'),
+        'light.b': makeEntity('on', 'T1'),
+      });
+
+      const changes: StateChangedEvent[] = [];
+      client.on('state_changed', (e) => changes.push(e));
+
+      capturedSubscribeCallback!(snapshot({
+        'light.a': makeEntity('off', 'T2'),
+        'light.b': makeEntity('off', 'T2'),
+      }));
+
+      const ids = changes.map((e) => (e as StateChangedEvent & { correlation_id: string }).correlation_id);
+      expect(ids[0]).not.toBe(ids[1]);
+    });
+
     it('emits state_changed for only the entity that changed', async () => {
       const { client } = await connectAndInitialise({
         'light.a': makeEntity('on', 'T1'),
