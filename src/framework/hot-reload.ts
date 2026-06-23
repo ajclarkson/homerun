@@ -40,7 +40,7 @@ export function startHotReload(automationsDir: string, registry: AutomationRegis
     ? path.join(automationsDir, `${process.env.AUTOMATION}.ts`)
     : `${automationsDir}/**/*.ts`;
 
-  watch(target, { ignoreInitial: true }).on('change', (filePath: string) => {
+  watch(target, { ignoreInitial: true, ignored: /node_modules/ }).on('change', (filePath: string) => {
     _reloadFile(filePath, registry).catch((err: unknown) => {
       console.error('[hot-reload] unexpected error:', err);
     });

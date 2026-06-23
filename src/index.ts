@@ -50,7 +50,10 @@ try {
 } catch {
   console.warn(`[homerun] AUTOMATIONS_DIR not found: ${automationsDir} — starting with no automations`);
 }
-for (const file of files.filter((f) => f.endsWith('.ts'))) {
+const isAutomation = (f: string) =>
+  f.endsWith('.ts') && !f.includes('node_modules') && !f.includes('.d.ts');
+
+for (const file of files.filter(isAutomation)) {
   await _reloadFile(path.join(automationsDir, file), registry);
 }
 console.log(`[homerun] loaded ${registry.getAll().length} automation(s)`);
