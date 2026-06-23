@@ -3,7 +3,10 @@
   "type": "module",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "./dist/lib.js",
+  "exports": {
+    ".": "./dist/lib.js"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
@@ -13,6 +16,7 @@
     "generate:ha-types:compiled": "homerun-generate-ha-types"
   },
   "bin": {
+    "homerun": "./dist/index.js",
     "homerun-generate-ha-types": "./dist/scripts/generate-ha-types.js"
   },
   "keywords": [],
