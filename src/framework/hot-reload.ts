@@ -19,7 +19,6 @@ export async function _reloadFile(
       platform: 'node',
       format: 'esm',
       write: false,
-      packages: 'external',
     });
 
     const code = result.outputFiles[0].text;
