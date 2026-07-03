@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/src/lib.d.ts",
       "default": "./dist/src/lib.js"
+    },
+    "./testing": {
+      "types": "./dist/src/testing.d.ts",
+      "default": "./dist/src/testing.js"
     }
   },
   "scripts": {
