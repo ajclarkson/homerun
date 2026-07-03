@@ -5,6 +5,7 @@ import { AutomationRegistry } from './registry.js';
 import type { Automation } from '../types/automation.js';
 import type { TriggerEvent } from '../types/triggers.js';
 import type { HAClient, EntityState, StateChangedEvent } from './ha-client.js';
+import type { MqttClient } from 'mqtt';
 
 // ---------- Helpers ----------
 
@@ -30,6 +31,18 @@ function makeRegistry(...automations: Automation<unknown>[]): AutomationRegistry
   const registry = new AutomationRegistry();
   for (const a of automations) registry.register(a);
   return registry;
+}
+
+// Minimal MQTT client mock: EventEmitter with subscribe/on stubs.
+function makeMockMqttClient() {
+  const emitter = new EventEmitter();
+  const subscribed = new Set<string>();
+  const client = {
+    subscribe: vi.fn((topic: string) => { subscribed.add(topic); }),
+    on: (event: string, cb: (...args: unknown[]) => void) => emitter.on(event, cb),
+    publish: (topic: string, payload: string) => emitter.emit('message', topic, Buffer.from(payload)),
+  } as unknown as MqttClient;
+  return { client, publish: (topic: string, payload: string) => emitter.emit('message', topic, Buffer.from(payload)), subscribed };
 }
 
 // Minimal HAClient mock: real EventEmitter + manually resolvable ready promise.
@@ -383,6 +396,70 @@ describe('TriggerEngine', () => {
         expect.anything(),
         expect.objectContaining({ gesture: 'single_press', button: '2' }),
       );
+    });
+  });
+
+  // ---------- mqtt_in ----------
+
+  describe('mqtt_in', () => {
+    it('dispatches to automation when a message arrives on its declared topic', () => {
+      const { client: haClient } = makeMockHAClient();
+      const { client: mqttClient, publish } = makeMockMqttClient();
+      const onMatch = vi.fn();
+      const automation = makeAutomation('a', [{ type: 'mqtt_in', topic: 'home/foo' }]);
+
+      const engine = new TriggerEngine(makeRegistry(automation), haClient, onMatch, mqttClient);
+      engine.start();
+
+      publish('home/foo', 'hello');
+
+      expect(onMatch).toHaveBeenCalledOnce();
+      expect(onMatch).toHaveBeenCalledWith(
+        automation,
+        expect.objectContaining({ type: 'mqtt_in', topic: 'home/foo', payload: 'hello' }),
+      );
+    });
+
+    it('does not dispatch when message arrives on a different topic', () => {
+      const { client: haClient } = makeMockHAClient();
+      const { client: mqttClient, publish } = makeMockMqttClient();
+      const onMatch = vi.fn();
+      const automation = makeAutomation('a', [{ type: 'mqtt_in', topic: 'home/foo' }]);
+
+      const engine = new TriggerEngine(makeRegistry(automation), haClient, onMatch, mqttClient);
+      engine.start();
+
+      publish('home/bar', 'hello');
+
+      expect(onMatch).not.toHaveBeenCalled();
+    });
+
+    it('dispatches to multiple automations subscribed to the same topic', () => {
+      const { client: haClient } = makeMockHAClient();
+      const { client: mqttClient, publish } = makeMockMqttClient();
+      const onMatch = vi.fn();
+      const a1 = makeAutomation('a1', [{ type: 'mqtt_in', topic: 'home/foo' }]);
+      const a2 = makeAutomation('a2', [{ type: 'mqtt_in', topic: 'home/foo' }]);
+
+      const engine = new TriggerEngine(makeRegistry(a1, a2), haClient, onMatch, mqttClient);
+      engine.start();
+
+      publish('home/foo', 'ping');
+
+      expect(onMatch).toHaveBeenCalledTimes(2);
+      expect(onMatch).toHaveBeenCalledWith(a1, expect.objectContaining({ type: 'mqtt_in', topic: 'home/foo' }));
+      expect(onMatch).toHaveBeenCalledWith(a2, expect.objectContaining({ type: 'mqtt_in', topic: 'home/foo' }));
+    });
+
+    it('starts cleanly without an mqttClient when no mqtt_in automations are registered', () => {
+      const { client: haClient } = makeMockHAClient();
+      const onMatch = vi.fn();
+      const automation = makeAutomation('a', [{ type: 'state_changed', entity: 'light.test' }]);
+
+      expect(() => {
+        const engine = new TriggerEngine(makeRegistry(automation), haClient, onMatch);
+        engine.start();
+      }).not.toThrow();
     });
   });
 });
