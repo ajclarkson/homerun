@@ -399,6 +399,55 @@ describe('TriggerEngine', () => {
     });
   });
 
+  // ---------- button handler hot-reload ----------
+
+  describe('button handler hot-reload', () => {
+    it('picks up a new button automation after registry change', async () => {
+      const { client, resolveReady, emitStateChanged } = makeMockHAClient();
+      const onMatch = vi.fn();
+      const registry = makeRegistry();
+
+      const engine = new TriggerEngine(registry, client, onMatch);
+      engine.start();
+      resolveReady();
+      await vi.runAllTimersAsync();
+
+      // Register a button automation after the engine has started.
+      registry.register(makeAutomation('a', [{ type: 'button', entity: 'sensor.button', gesture: 'single_press' }]));
+
+      emitStateChanged({ entity_id: 'sensor.button', old_state: undefined, new_state: makeEntityState('short_press', 'sensor.button'), correlation_id: 'test-cid' });
+      expect(onMatch).toHaveBeenCalledOnce();
+      expect(onMatch).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ type: 'button', gesture: 'single_press' }));
+    });
+
+    it('respects updated double_press config after registry change', async () => {
+      const { client, resolveReady, emitStateChanged } = makeMockHAClient();
+      const onMatch = vi.fn();
+      // Initially registered with only single_press — no double_press window.
+      const registry = makeRegistry(
+        makeAutomation('a', [{ type: 'button', entity: 'sensor.button', gesture: 'single_press' }]),
+      );
+
+      const engine = new TriggerEngine(registry, client, onMatch);
+      engine.start();
+      resolveReady();
+      await vi.runAllTimersAsync();
+
+      // Re-register with double_press added — button handler should rebuild and now wait.
+      registry.register(makeAutomation('a', [
+        { type: 'button', entity: 'sensor.button', gesture: 'single_press' },
+        { type: 'button', entity: 'sensor.button', gesture: 'double_press' },
+      ]));
+
+      emitStateChanged({ entity_id: 'sensor.button', old_state: undefined, new_state: makeEntityState('short_press', 'sensor.button'), correlation_id: 'test-cid' });
+      // Should NOT fire immediately now that double_press is declared.
+      expect(onMatch).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(400);
+      expect(onMatch).toHaveBeenCalledOnce();
+      expect(onMatch).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ gesture: 'single_press' }));
+    });
+  });
+
   // ---------- mqtt_in ----------
 
   describe('mqtt_in', () => {

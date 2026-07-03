@@ -84,11 +84,14 @@ export class TriggerEngine {
     private readonly onMatch: (automation: Automation<unknown>, event: TriggerEvent) => void,
     private readonly mqttClient?: MqttClient,
   ) {
-    // Button handlers are built from the automation snapshot at construction time.
-    // The double-press window config per entity is stable — reloading an automation
-    // that changes its button trigger gestures requires a restart to take effect.
+    this.rebuildButtonHandlers();
+    registry.onChange(() => this.rebuildButtonHandlers());
+  }
+
+  private rebuildButtonHandlers(): void {
+    this.buttonHandlers.clear();
     const entityGestures = new Map<string, Set<string>>();
-    for (const automation of registry.getAll()) {
+    for (const automation of this.registry.getAll()) {
       for (const trigger of automation.triggers) {
         if (trigger.type === 'button') {
           if (!entityGestures.has(trigger.entity)) {
@@ -98,7 +101,6 @@ export class TriggerEngine {
         }
       }
     }
-
     for (const [entity, gestures] of entityGestures) {
       this.buttonHandlers.set(
         entity,
