@@ -579,6 +579,64 @@ describe('TriggerEngine', () => {
     });
   });
 
+  // ---------- manual trigger ----------
+
+  describe('manual trigger via homerun/trigger/+', () => {
+    it('fires the named automation when a message arrives on homerun/trigger/{id}', async () => {
+      const { client: haClient } = makeMockHAClient();
+      const { client: mqttClient, publish } = makeMockMqttClient();
+      const onMatch = vi.fn();
+      const automation = makeAutomation('parlour:lighting', [{ type: 'on_start' }]);
+
+      const engine = new TriggerEngine(makeRegistry(automation), haClient, onMatch, mqttClient);
+      engine.start();
+
+      publish('homerun/trigger/parlour:lighting', '{}');
+
+      expect(onMatch).toHaveBeenCalledOnce();
+      expect(onMatch).toHaveBeenCalledWith(automation, expect.objectContaining({ type: 'on_start' }));
+    });
+
+    it('logs a warning and does not call onMatch for an unknown automation id', () => {
+      const { client: haClient } = makeMockHAClient();
+      const { client: mqttClient, publish } = makeMockMqttClient();
+      const onMatch = vi.fn();
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const engine = new TriggerEngine(makeRegistry(), haClient, onMatch, mqttClient);
+      engine.start();
+
+      publish('homerun/trigger/unknown:automation', '{}');
+
+      expect(onMatch).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('unknown:automation'));
+      warnSpy.mockRestore();
+    });
+
+    it('subscribes to homerun/trigger/+ on start', () => {
+      const { client: haClient } = makeMockHAClient();
+      const { client: mqttClient, subscribed } = makeMockMqttClient();
+      const engine = new TriggerEngine(makeRegistry(), haClient, vi.fn(), mqttClient);
+      engine.start();
+      expect(subscribed.has('homerun/trigger/+')).toBe(true);
+    });
+
+    it('does not interfere with regular mqtt_in messages on other topics', async () => {
+      const { client: haClient } = makeMockHAClient();
+      const { client: mqttClient, publish } = makeMockMqttClient();
+      const onMatch = vi.fn();
+      const automation = makeAutomation('a', [{ type: 'mqtt_in', topic: 'home/foo' }]);
+
+      const engine = new TriggerEngine(makeRegistry(automation), haClient, onMatch, mqttClient);
+      engine.start();
+
+      publish('home/foo', 'hello');
+
+      expect(onMatch).toHaveBeenCalledOnce();
+      expect(onMatch).toHaveBeenCalledWith(automation, expect.objectContaining({ type: 'mqtt_in', topic: 'home/foo' }));
+    });
+  });
+
   // ---------- mqtt_in ----------
 
   describe('mqtt_in', () => {

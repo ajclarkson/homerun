@@ -142,7 +142,19 @@ export class TriggerEngine {
       for (const topic of topics) {
         this.mqttClient.subscribe(topic);
       }
+      this.mqttClient.subscribe('homerun/trigger/+');
+
       this.mqttClient.on('message', (topic: string, payload: Buffer) => {
+        if (topic.startsWith('homerun/trigger/')) {
+          const automationId = topic.slice('homerun/trigger/'.length);
+          const automation = this.registry.getById(automationId);
+          if (!automation) {
+            console.warn(`[trigger-engine] manual trigger: no automation with id "${automationId}"`);
+            return;
+          }
+          this.onMatch(automation, { type: 'on_start', correlation_id: crypto.randomUUID() });
+          return;
+        }
         this.dispatch({
           type: 'mqtt_in',
           topic,
