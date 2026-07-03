@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { AutomationRegistry } from './registry.js';
 import type { Automation } from '../types/automation.js';
 
@@ -74,5 +74,33 @@ describe('AutomationRegistry', () => {
   it('getById returns undefined for an unknown id', () => {
     const reg = new AutomationRegistry();
     expect(reg.getById('unknown:thing')).toBeUndefined();
+  });
+
+  it('onChange callback is called when an automation is registered', () => {
+    const reg = new AutomationRegistry();
+    const cb = vi.fn();
+    reg.onChange(cb);
+    reg.register(makeAutomation('a'));
+    expect(cb).toHaveBeenCalledOnce();
+  });
+
+  it('onChange callback is called on re-registration', () => {
+    const reg = new AutomationRegistry();
+    const cb = vi.fn();
+    reg.register(makeAutomation('a'));
+    reg.onChange(cb);
+    reg.register(makeAutomation('a'));
+    expect(cb).toHaveBeenCalledOnce();
+  });
+
+  it('multiple onChange callbacks all fire', () => {
+    const reg = new AutomationRegistry();
+    const cb1 = vi.fn();
+    const cb2 = vi.fn();
+    reg.onChange(cb1);
+    reg.onChange(cb2);
+    reg.register(makeAutomation('a'));
+    expect(cb1).toHaveBeenCalledOnce();
+    expect(cb2).toHaveBeenCalledOnce();
   });
 });
