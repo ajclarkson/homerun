@@ -46,17 +46,31 @@ function makeMockMqttClient() {
 }
 
 // Minimal HAClient mock: real EventEmitter + manually resolvable ready promise.
+// emitStateChanged also updates the internal state cache so haClient.state() reflects it.
 function makeMockHAClient() {
   const emitter = new EventEmitter();
   let readyResolve!: () => void;
   const ready = new Promise<void>((resolve) => { readyResolve = resolve; });
+  const currentStates = new Map<string, EntityState>();
 
-  const client = Object.assign(emitter, { ready }) as unknown as HAClient;
+  const client = Object.assign(emitter, {
+    ready,
+    state: (entityId: string) => currentStates.get(entityId),
+  }) as unknown as HAClient;
+
+  const emitStateChanged = (event: StateChangedEvent) => {
+    currentStates.set(event.entity_id, event.new_state);
+    emitter.emit('state_changed', event);
+  };
 
   return {
     client,
     resolveReady: () => readyResolve(),
-    emitStateChanged: (event: StateChangedEvent) => emitter.emit('state_changed', event),
+    emitStateChanged,
+    // Update state without emitting an event — simulates external state drift.
+    setCurrentState: (entityId: string, state: string) => {
+      currentStates.set(entityId, makeEntityState(state, entityId));
+    },
   };
 }
 
@@ -396,6 +410,123 @@ describe('TriggerEngine', () => {
         expect.anything(),
         expect.objectContaining({ gesture: 'single_press', button: '2' }),
       );
+    });
+  });
+
+  // ---------- state_changed with duration ----------
+
+  describe('state_changed with duration', () => {
+    it('delays dispatch by duration ms and fires if state still matches', async () => {
+      const { client, resolveReady, emitStateChanged } = makeMockHAClient();
+      const onMatch = vi.fn();
+      const automation = makeAutomation('a', [{ type: 'state_changed', entity: 'binary_sensor.motion', duration: 5000 }]);
+
+      const engine = new TriggerEngine(makeRegistry(automation), client, onMatch);
+      engine.start();
+      resolveReady();
+      await vi.runAllTimersAsync();
+
+      emitStateChanged({ entity_id: 'binary_sensor.motion', old_state: makeEntityState('on', 'binary_sensor.motion'), new_state: makeEntityState('off', 'binary_sensor.motion'), correlation_id: 'test-cid' });
+
+      expect(onMatch).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(5000);
+      expect(onMatch).toHaveBeenCalledOnce();
+      expect(onMatch).toHaveBeenCalledWith(automation, expect.objectContaining({ type: 'state_changed', entity_id: 'binary_sensor.motion' }));
+    });
+
+    it('does not dispatch if state has changed by the time the timer fires', async () => {
+      const { client, resolveReady, emitStateChanged, setCurrentState } = makeMockHAClient();
+      const onMatch = vi.fn();
+      const automation = makeAutomation('a', [{ type: 'state_changed', entity: 'binary_sensor.motion', duration: 5000 }]);
+
+      const engine = new TriggerEngine(makeRegistry(automation), client, onMatch);
+      engine.start();
+      resolveReady();
+      await vi.runAllTimersAsync();
+
+      emitStateChanged({ entity_id: 'binary_sensor.motion', old_state: makeEntityState('on', 'binary_sensor.motion'), new_state: makeEntityState('off', 'binary_sensor.motion'), correlation_id: 'test-cid' });
+      // State reverts without a new event (re-check will fail).
+      setCurrentState('binary_sensor.motion', 'on');
+
+      vi.advanceTimersByTime(5000);
+      expect(onMatch).not.toHaveBeenCalled();
+    });
+
+    it('cancels the pending timer and restarts it when a new state_changed arrives', async () => {
+      const { client, resolveReady, emitStateChanged } = makeMockHAClient();
+      const onMatch = vi.fn();
+      const automation = makeAutomation('a', [{ type: 'state_changed', entity: 'binary_sensor.motion', duration: 5000 }]);
+
+      const engine = new TriggerEngine(makeRegistry(automation), client, onMatch);
+      engine.start();
+      resolveReady();
+      await vi.runAllTimersAsync();
+
+      // First event: off, 5000ms timer starts.
+      emitStateChanged({ entity_id: 'binary_sensor.motion', old_state: undefined, new_state: makeEntityState('off', 'binary_sensor.motion'), correlation_id: 'cid-1' });
+      // At 2000ms the entity changes back — timer resets.
+      vi.advanceTimersByTime(2000);
+      emitStateChanged({ entity_id: 'binary_sensor.motion', old_state: makeEntityState('off', 'binary_sensor.motion'), new_state: makeEntityState('on', 'binary_sensor.motion'), correlation_id: 'cid-2' });
+
+      // Original 5000ms timer would fire here (3000ms after second event) — no dispatch.
+      vi.advanceTimersByTime(3000);
+      expect(onMatch).not.toHaveBeenCalled();
+
+      // Second timer fires 5000ms after second event.
+      vi.advanceTimersByTime(2000);
+      expect(onMatch).toHaveBeenCalledOnce();
+      expect(onMatch).toHaveBeenCalledWith(automation, expect.objectContaining({ correlation_id: 'cid-2' }));
+    });
+
+    it('tracks two automations with different durations on the same entity independently', async () => {
+      const { client, resolveReady, emitStateChanged } = makeMockHAClient();
+      const onMatch = vi.fn();
+      const fast = makeAutomation('fast', [{ type: 'state_changed', entity: 'binary_sensor.motion', duration: 1000 }]);
+      const slow = makeAutomation('slow', [{ type: 'state_changed', entity: 'binary_sensor.motion', duration: 5000 }]);
+
+      const engine = new TriggerEngine(makeRegistry(fast, slow), client, onMatch);
+      engine.start();
+      resolveReady();
+      await vi.runAllTimersAsync();
+
+      emitStateChanged({ entity_id: 'binary_sensor.motion', old_state: undefined, new_state: makeEntityState('off', 'binary_sensor.motion'), correlation_id: 'test-cid' });
+
+      vi.advanceTimersByTime(1000);
+      expect(onMatch).toHaveBeenCalledOnce();
+      expect(onMatch).toHaveBeenCalledWith(fast, expect.anything());
+
+      vi.advanceTimersByTime(4000);
+      expect(onMatch).toHaveBeenCalledTimes(2);
+      expect(onMatch).toHaveBeenCalledWith(slow, expect.anything());
+    });
+
+    it('duration: 0 dispatches immediately like no duration', async () => {
+      const { client, resolveReady, emitStateChanged } = makeMockHAClient();
+      const onMatch = vi.fn();
+      const automation = makeAutomation('a', [{ type: 'state_changed', entity: 'binary_sensor.motion', duration: 0 }]);
+
+      const engine = new TriggerEngine(makeRegistry(automation), client, onMatch);
+      engine.start();
+      resolveReady();
+      await vi.runAllTimersAsync();
+
+      emitStateChanged({ entity_id: 'binary_sensor.motion', old_state: undefined, new_state: makeEntityState('off', 'binary_sensor.motion'), correlation_id: 'test-cid' });
+      expect(onMatch).toHaveBeenCalledOnce();
+    });
+
+    it('preserves the original correlation_id through the delay', async () => {
+      const { client, resolveReady, emitStateChanged } = makeMockHAClient();
+      const onMatch = vi.fn();
+      const automation = makeAutomation('a', [{ type: 'state_changed', entity: 'binary_sensor.motion', duration: 1000 }]);
+
+      const engine = new TriggerEngine(makeRegistry(automation), client, onMatch);
+      engine.start();
+      resolveReady();
+      await vi.runAllTimersAsync();
+
+      emitStateChanged({ entity_id: 'binary_sensor.motion', old_state: undefined, new_state: makeEntityState('off', 'binary_sensor.motion'), correlation_id: 'original-cid' });
+      vi.advanceTimersByTime(1000);
+      expect(onMatch).toHaveBeenCalledWith(automation, expect.objectContaining({ correlation_id: 'original-cid' }));
     });
   });
 
