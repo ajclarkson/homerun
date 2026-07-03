@@ -66,7 +66,7 @@ engine = new TriggerEngine(registry, haClient, (automation, event) => {
   runPipeline(automation, event, haClient, { observability, actionRuntime }).catch((err: unknown) => {
     console.error('[homerun] pipeline error:', err);
   });
-});
+}, mqtt);
 const scheduler = new Scheduler(registry.getAll(), (e) => engine.dispatch(e), haClient.ready);
 
 engine.start();

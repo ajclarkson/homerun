@@ -1,3 +1,4 @@
+import type { MqttClient } from 'mqtt';
 import type { Automation } from '../types/automation.js';
 import type { Trigger, TriggerEvent } from '../types/triggers.js';
 import type { HAClient, StateChangedEvent } from './ha-client.js';
@@ -81,6 +82,7 @@ export class TriggerEngine {
     private readonly registry: AutomationRegistry,
     private readonly haClient: HAClient,
     private readonly onMatch: (automation: Automation<unknown>, event: TriggerEvent) => void,
+    private readonly mqttClient?: MqttClient,
   ) {
     // Button handlers are built from the automation snapshot at construction time.
     // The double-press window config per entity is stable — reloading an automation
@@ -126,6 +128,26 @@ export class TriggerEngine {
       .catch((err) => {
         console.error('[trigger-engine] failed to start:', err);
       });
+
+    if (this.mqttClient) {
+      const topics = new Set<string>();
+      for (const automation of this.registry.getAll()) {
+        for (const trigger of automation.triggers) {
+          if (trigger.type === 'mqtt_in') topics.add(trigger.topic);
+        }
+      }
+      for (const topic of topics) {
+        this.mqttClient.subscribe(topic);
+      }
+      this.mqttClient.on('message', (topic: string, payload: Buffer) => {
+        this.dispatch({
+          type: 'mqtt_in',
+          topic,
+          payload: payload.toString(),
+          correlation_id: `mqtt-${Date.now()}`,
+        });
+      });
+    }
   }
 
   // Entry point for Timer Manager loopback and resolved button gestures.
@@ -178,8 +200,8 @@ function matchesTrigger(trigger: Trigger, event: TriggerEvent): boolean {
     case 'on_start':
       return event.type === 'on_start';
     case 'mqtt_in':
-      // Not yet implemented — mqtt_in events are never dispatched.
-      return false;
+      if (event.type !== 'mqtt_in') return false;
+      return trigger.topic === event.topic;
     default: {
       const _exhaustive: never = trigger;
       return false;
