@@ -1,5 +1,5 @@
 import type { HAState, HAContext } from '../framework/ha-client.js';
-import type { Trigger } from './triggers.js';
+import type { Trigger, TriggerEvent } from './triggers.js';
 import type { Action } from './actions.js';
 
 export type { HAState, HAContext };
@@ -30,7 +30,7 @@ export interface Automation<C> {
   location: string;
   subsystem: string;
   triggers: Trigger[];
-  context: (state: HAState, ha: HAContext) => C | Abort;
+  context: (state: HAState, ha: HAContext, event: TriggerEvent) => C | Abort;
   reduce: (ctx: C) => Decision;
 }
 

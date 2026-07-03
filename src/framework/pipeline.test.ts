@@ -47,9 +47,27 @@ describe('runPipeline — happy path', () => {
     auto = makeAutomation();
   });
 
-  it('calls context with haClient.state and haClient.context', async () => {
+  it('calls context with haClient.state, haClient.context, and the trigger event', async () => {
     await runPipeline(auto, onStartEvent, ha as never, deps as never);
-    expect(auto.context).toHaveBeenCalledWith(ha.state, ha.context);
+    expect(auto.context).toHaveBeenCalledWith(ha.state, ha.context, onStartEvent);
+  });
+
+  it('passes old_state from state_changed event through to context', async () => {
+    const stateChangedEvent: TriggerEvent = {
+      type: 'state_changed',
+      entity_id: 'light.test',
+      old_state: { entity_id: 'light.test', state: 'off', attributes: {}, last_changed: 'T', last_updated: 'T' },
+      new_state: { entity_id: 'light.test', state: 'on', attributes: {}, last_changed: 'T', last_updated: 'T' },
+      correlation_id: 'test-cid',
+    };
+    let capturedEvent: TriggerEvent | undefined;
+    const a = makeAutomation({ context: vi.fn().mockImplementation((_state: unknown, _ha: unknown, event: TriggerEvent) => { capturedEvent = event; return {}; }) });
+    await runPipeline(a, stateChangedEvent, ha as never, deps as never);
+    expect(capturedEvent?.type).toBe('state_changed');
+    if (capturedEvent?.type === 'state_changed') {
+      expect(capturedEvent.old_state?.state).toBe('off');
+      expect(capturedEvent.new_state.state).toBe('on');
+    }
   });
 
   it('calls reduce with the context result', async () => {
