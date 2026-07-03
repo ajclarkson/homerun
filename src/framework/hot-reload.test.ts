@@ -61,6 +61,52 @@ describe('_reloadFile — happy path', () => {
     expect(reg.register).toHaveBeenCalledWith(auto);
   });
 
+  it('registers all automations when the default export is an array', async () => {
+    const reg = makeRegistry();
+    const a1 = makeAutomation('parlour:lighting');
+    const a2 = makeAutomation('kitchen:lighting');
+    const importer = makeImporter({ default: [a1, a2] });
+
+    await _reloadFile('/automations/multi-room.ts', reg, importer);
+
+    expect(reg.register).toHaveBeenCalledTimes(2);
+    expect(reg.register).toHaveBeenCalledWith(a1);
+    expect(reg.register).toHaveBeenCalledWith(a2);
+  });
+
+  it('deregisters previously loaded automations from the same file on reload', async () => {
+    const reg = makeRegistry();
+    const fileToIds = new Map<string, string[]>();
+    const v1 = makeAutomation('parlour:lighting');
+    const importer1 = makeImporter({ default: v1 });
+
+    await _reloadFile('/automations/parlour-lighting.ts', reg, importer1, fileToIds);
+    expect(reg.register).toHaveBeenCalledWith(v1);
+
+    const v2 = makeAutomation('parlour:lighting');
+    const importer2 = makeImporter({ default: v2 });
+    await _reloadFile('/automations/parlour-lighting.ts', reg, importer2, fileToIds);
+
+    expect(reg.unregister).toHaveBeenCalledWith('parlour:lighting');
+    expect(reg.register).toHaveBeenCalledWith(v2);
+  });
+
+  it('deregisters all array automations from a file when it reloads', async () => {
+    const reg = makeRegistry();
+    const fileToIds = new Map<string, string[]>();
+    const a1 = makeAutomation('parlour:lighting');
+    const a2 = makeAutomation('kitchen:lighting');
+    await _reloadFile('/automations/multi-room.ts', reg, makeImporter({ default: [a1, a2] }), fileToIds);
+
+    vi.mocked(reg.register).mockClear();
+    const a3 = makeAutomation('bedroom:lighting');
+    await _reloadFile('/automations/multi-room.ts', reg, makeImporter({ default: a3 }), fileToIds);
+
+    expect(reg.unregister).toHaveBeenCalledWith('parlour:lighting');
+    expect(reg.unregister).toHaveBeenCalledWith('kitchen:lighting');
+    expect(reg.register).toHaveBeenCalledWith(a3);
+  });
+
   it('passes a data: URI to the importer', async () => {
     const reg = makeRegistry();
     const importer = makeImporter({ default: makeAutomation() });
@@ -87,15 +133,17 @@ describe('_reloadFile — happy path', () => {
 });
 
 describe('_reloadFile — build error', () => {
-  it('keeps the previous automation and does not throw', async () => {
+  it('keeps the previous automation and does not unregister it', async () => {
     mockBuild.mockRejectedValueOnce(new Error('syntax error'));
     const reg = makeRegistry();
+    const fileToIds = new Map<string, string[]>();
     const existing = makeAutomation();
     reg.register(existing);
+    fileToIds.set('/automations/parlour-lighting.ts', ['parlour:lighting']);
 
-    await _reloadFile('/automations/parlour-lighting.ts', reg, makeImporter({ default: makeAutomation() }));
+    await _reloadFile('/automations/parlour-lighting.ts', reg, makeImporter({ default: makeAutomation() }), fileToIds);
 
-    expect(reg.register).toHaveBeenCalledTimes(1);
+    expect(reg.unregister).not.toHaveBeenCalled();
     expect(reg.getById('parlour:lighting')).toBe(existing);
   });
 });

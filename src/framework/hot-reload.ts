@@ -2,15 +2,20 @@ import path from 'node:path';
 import { watch } from 'chokidar';
 import { build } from 'esbuild';
 import type { AutomationRegistry } from './registry.js';
+import type { Automation } from '../types/automation.js';
 
 type Importer = (dataUri: string) => Promise<{ default: unknown }>;
 
 const defaultImporter: Importer = (dataUri) => import(dataUri);
 
+// Module-level file→IDs map used in production. Tests pass their own instance.
+const moduleFileToIds = new Map<string, string[]>();
+
 export async function _reloadFile(
   filePath: string,
   registry: AutomationRegistry,
   importer: Importer = defaultImporter,
+  fileToIds: Map<string, string[]> = moduleFileToIds,
 ): Promise<void> {
   try {
     const result = await build({
@@ -29,7 +34,20 @@ export async function _reloadFile(
       throw new Error(`${filePath} has no default export`);
     }
 
-    registry.register(mod.default as never);
+    const automations: Automation<unknown>[] = Array.isArray(mod.default)
+      ? (mod.default as Automation<unknown>[])
+      : [mod.default as Automation<unknown>];
+
+    // Deregister previous automations from this file only after successful load.
+    for (const id of fileToIds.get(filePath) ?? []) {
+      registry.unregister(id);
+    }
+
+    for (const auto of automations) {
+      registry.register(auto);
+    }
+
+    fileToIds.set(filePath, automations.map((a) => a.id));
   } catch (err) {
     console.error(`[hot-reload] failed to reload ${filePath}:`, err);
   }
