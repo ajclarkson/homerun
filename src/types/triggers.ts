@@ -4,7 +4,7 @@ import type { EntityState } from '../framework/ha-client.js';
 // Declared on an Automation to describe what events activate it.
 
 export type Trigger =
-  | { type: 'state_changed'; entity: string | RegExp }
+  | { type: 'state_changed'; entity: string | RegExp; duration?: number }
   | { type: 'schedule'; cron: string }
   | { type: 'on_start' }
   | { type: 'timer_expired'; timerKey: string }

@@ -77,6 +77,7 @@ export function parseButtonAction(
 
 export class TriggerEngine {
   private readonly buttonHandlers = new Map<string, ButtonGestureHandler>();
+  private readonly durationTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
     private readonly registry: AutomationRegistry,
@@ -163,7 +164,20 @@ export class TriggerEngine {
     for (const automation of this.registry.getAll()) {
       for (const trigger of automation.triggers) {
         if (matchesTrigger(trigger, event)) {
-          this.onMatch(automation, event);
+          if (trigger.type === 'state_changed' && trigger.duration && event.type === 'state_changed') {
+            const key = `${automation.id}:${event.entity_id}`;
+            const existing = this.durationTimers.get(key);
+            if (existing !== undefined) clearTimeout(existing);
+            const timer = setTimeout(() => {
+              this.durationTimers.delete(key);
+              if (this.haClient.state(event.entity_id)?.state === event.new_state.state) {
+                this.onMatch(automation, event);
+              }
+            }, trigger.duration);
+            this.durationTimers.set(key, timer);
+          } else {
+            this.onMatch(automation, event);
+          }
           break; // don't fire the same automation twice for one event
         }
       }
