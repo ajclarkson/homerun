@@ -31,7 +31,7 @@ export async function runPipeline(
   // Step 2: Context
   let ctx: unknown;
   try {
-    ctx = automation.context(haClient.state, haClient.context);
+    ctx = automation.context(haClient.state, haClient.context, event);
   } catch {
     deps.observability.publishDecision({ ...base, type: 'abort', reason: 'unhandled_error' });
     return;
