@@ -24,6 +24,7 @@ export async function _reloadFile(
       platform: 'node',
       format: 'esm',
       write: false,
+      alias: { homerun: path.resolve(import.meta.dirname, '../lib.js') },
     });
 
     const code = result.outputFiles[0].text;
