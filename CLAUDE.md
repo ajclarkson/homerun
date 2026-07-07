@@ -87,6 +87,7 @@ Passed as the second argument to every context builder. Provides synchronous acc
 interface HAContext {
   entitiesByLabel: (label: string) => string[];
   labelsFor: (entity: string) => string[];
+  entitiesByArea: (area: string) => string[];
 }
 ```
 
@@ -141,6 +142,23 @@ it('returns no_action when disabled', () => {
 
 `HAState` in tests is a plain function: `(entity: string) => mockValues[entity]`.
 
+## MQTT topics
+
+All observability events are published under the `homerun/` namespace:
+
+| Topic | Retained | Purpose |
+|-------|----------|---------|
+| `homerun/events` | No | Event bus — every decision, abort, and action event |
+| `homerun/{location}/{subsystem}/decision` | Yes | Latest decision snapshot per automation |
+| `homerun/dev/events` | No | Same as above but when `DRY_RUN=true` |
+| `homerun/dev/{location}/{subsystem}/decision` | Yes | Same as above but when `DRY_RUN=true` |
+
+Dry-run events are routed to `homerun/dev/*` so they cannot overwrite retained live decision state.
+
+## Consumer repo
+
+Automations live in a separate private consumer repo. It depends on this package via a local file link (`"homerun": "file:../homerun"`). The `homerun-generate-ha-types` bin is invoked from there as `npm run codegen`.
+
 ## Current state
 
-`HAClient` is complete — see `src/framework/ha-client.ts`. Remaining work is tracked as [GitHub issues](https://github.com/ajclarkson/homerun/issues).
+The full bootstrap is running. The framework is in active development — remaining work is tracked as [GitHub issues](https://github.com/ajclarkson/homerun/issues).
