@@ -1,8 +1,11 @@
 {
-  "name": "homerun",
+  "name": "@ajclarkson/homerun",
   "type": "module",
-  "version": "1.0.0",
-  "description": "",
+  "version": "0.0.1",
+  "description": "TypeScript automation framework for Home Assistant",
+  "files": [
+    "dist"
+  ],
   "main": "./dist/src/lib.js",
   "types": "./dist/src/lib.d.ts",
   "exports": {
