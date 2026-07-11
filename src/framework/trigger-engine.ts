@@ -77,6 +77,7 @@ export function parseButtonAction(
 
 export class TriggerEngine {
   private readonly buttonHandlers = new Map<string, ButtonGestureHandler>();
+  private regexButtonTriggers: Array<{ pattern: RegExp; gestures: Set<string> }> = [];
   private readonly durationTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
@@ -91,22 +92,33 @@ export class TriggerEngine {
 
   private rebuildButtonHandlers(): void {
     this.buttonHandlers.clear();
+    this.regexButtonTriggers = [];
     const entityGestures = new Map<string, Set<string>>();
+    const regexGestures = new Map<RegExp, Set<string>>();
+
     for (const automation of this.registry.getAll()) {
       for (const trigger of automation.triggers) {
         if (trigger.type === 'button') {
-          if (!entityGestures.has(trigger.entity)) {
-            entityGestures.set(trigger.entity, new Set());
+          if (typeof trigger.entity === 'string') {
+            if (!entityGestures.has(trigger.entity)) entityGestures.set(trigger.entity, new Set());
+            entityGestures.get(trigger.entity)!.add(trigger.gesture);
+          } else {
+            if (!regexGestures.has(trigger.entity)) regexGestures.set(trigger.entity, new Set());
+            regexGestures.get(trigger.entity)!.add(trigger.gesture);
           }
-          entityGestures.get(trigger.entity)!.add(trigger.gesture);
         }
       }
     }
+
     for (const [entity, gestures] of entityGestures) {
       this.buttonHandlers.set(
         entity,
         new ButtonGestureHandler(entity, (e) => this.dispatch(e), gestures.has('double_press')),
       );
+    }
+
+    for (const [pattern, gestures] of regexGestures) {
+      this.regexButtonTriggers.push({ pattern, gestures });
     }
   }
 
@@ -114,7 +126,19 @@ export class TriggerEngine {
     this.haClient.ready
       .then(() => {
         this.haClient.on('state_changed', (event: StateChangedEvent) => {
-          const handler = this.buttonHandlers.get(event.entity_id);
+          let handler = this.buttonHandlers.get(event.entity_id);
+          if (!handler) {
+            const matchingGestures = new Set<string>();
+            for (const { pattern, gestures } of this.regexButtonTriggers) {
+              if (pattern.test(event.entity_id)) {
+                for (const g of gestures) matchingGestures.add(g);
+              }
+            }
+            if (matchingGestures.size > 0) {
+              handler = new ButtonGestureHandler(event.entity_id, (e) => this.dispatch(e), matchingGestures.has('double_press'));
+              this.buttonHandlers.set(event.entity_id, handler);
+            }
+          }
           if (handler) {
             handler.handle(event.new_state.state, event.correlation_id);
           } else {
@@ -215,8 +239,11 @@ function matchesTrigger(trigger: Trigger, event: TriggerEvent): boolean {
     }
     case 'button': {
       if (event.type !== 'button') return false;
+      const entityMatch = typeof trigger.entity === 'string'
+        ? trigger.entity === event.entity_id
+        : trigger.entity.test(event.entity_id);
       return (
-        trigger.entity === event.entity_id &&
+        entityMatch &&
         trigger.gesture === event.gesture &&
         (trigger.button === undefined || trigger.button === event.button)
       );
