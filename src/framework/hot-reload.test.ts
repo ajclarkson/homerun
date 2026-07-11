@@ -322,6 +322,13 @@ describe('startHotReload — AUTOMATION env var', () => {
     expect(mockWatch).toHaveBeenCalledWith('/automations/**/*.ts', expect.anything());
   });
 
+  it('registers automations when a new file is added', async () => {
+    const { startHotReload } = await import('./hot-reload.js');
+    startHotReload('/automations', makeRegistry());
+    const handlers = mockWatcher.on.mock.calls.map((c: unknown[]) => c[0]);
+    expect(handlers).toContain('add');
+  });
+
   it('ignores .test.ts files in the watcher', async () => {
     const { startHotReload } = await import('./hot-reload.js');
     startHotReload('/automations', makeRegistry());

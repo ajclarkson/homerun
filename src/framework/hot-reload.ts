@@ -111,11 +111,14 @@ export function startHotReload(automationsDir: string, registry: AutomationRegis
 
   const watcher = watch(target, { ignoreInitial: true, ignored: [/node_modules/, /\.test\.ts$/] });
 
-  watcher.on('change', (filePath: string) => {
+  const reload = (filePath: string): void => {
     _reloadFile(filePath, registry).catch((err: unknown) => {
       console.error('[hot-reload] unexpected error:', err);
     });
-  });
+  };
+
+  watcher.on('add', reload);
+  watcher.on('change', reload);
 
   watcher.on('unlink', (filePath: string) => {
     _deleteFile(filePath, registry);
