@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { readdir, writeFile } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { connect } from 'mqtt';
 import { HAClient } from './framework/ha-client.js';
@@ -11,17 +11,13 @@ import { TriggerEngine } from './framework/trigger-engine.js';
 import { Scheduler } from './framework/scheduler.js';
 import { _reloadFile, startHotReload } from './framework/hot-reload.js';
 import { runPipeline } from './framework/pipeline.js';
+import { ApiServer } from './framework/api-server.js';
 
 process.on('uncaughtException', (err) => {
   console.error('[homerun] uncaughtException:', err);
 });
 process.on('unhandledRejection', (reason) => {
   console.error('[homerun] unhandledRejection:', reason);
-});
-
-// Write PID so the git-sync exechook can signal us after each sync.
-await writeFile('/tmp/homerun.pid', String(process.pid)).catch(() => {
-  console.warn('[homerun] could not write PID file — SIGUSR1 rescan will not be available');
 });
 
 // 1. Connect MQTT before anything else (Observability and ActionRuntime need it).
@@ -84,20 +80,41 @@ scheduler.start();
 
 // 5. Start hot-reload watcher (dev) and SIGUSR1 rescan (git-sync sidecar in K8s).
 startHotReload(automationsDir, registry);
+
+async function reload(): Promise<void> {
+  await loadAutomations();
+  console.log(`[homerun] rescan complete — ${registry.getAll().length} automation(s) registered`);
+}
+
 process.on('SIGUSR1', () => {
   console.log('[homerun] SIGUSR1 received — rescanning automations');
-  loadAutomations().then(() => {
-    console.log(`[homerun] rescan complete — ${registry.getAll().length} automation(s) registered`);
-  }).catch((err: unknown) => {
+  reload().catch((err: unknown) => {
     console.error('[homerun] rescan failed:', err);
   });
 });
 
-// 6. Connect to HA last — state_changed events start flowing once ready resolves.
+// 6. Start the HTTP API server.
+let haReady = false;
+const apiServer = new ApiServer({
+  registry,
+  onTrigger: (automation, event) => {
+    runPipeline(automation, event, haClient, { observability, actionRuntime }).catch((err: unknown) => {
+      console.error('[homerun] pipeline error (http trigger):', err);
+    });
+  },
+  onReload: reload,
+  isReady: () => haReady,
+  entityCount: () => haClient.entityCount,
+  observability,
+});
+await apiServer.start(Number(process.env.API_PORT ?? 7070));
+
+// 7. Connect to HA last — state_changed events start flowing once ready resolves.
 haClient.on('reconnected', () => {
   console.log(`[homerun] reconnected — ${haClient.entityCount} entities refreshed`);
 });
 
 await haClient.connect(process.env.HA_URL!, process.env.HA_TOKEN!);
 await haClient.ready;
+haReady = true;
 console.log(`[homerun] ready — ${haClient.entityCount} entities cached`);

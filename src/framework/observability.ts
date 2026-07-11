@@ -17,18 +17,30 @@ export interface ObsEvent {
 }
 
 export class Observability {
+  private readonly listeners: Array<(event: ObsEvent) => void> = [];
+
   constructor(private readonly mqtt: MqttClient) {}
+
+  subscribe(listener: (event: ObsEvent) => void): () => void {
+    this.listeners.push(listener);
+    return () => {
+      const idx = this.listeners.indexOf(listener);
+      if (idx !== -1) this.listeners.splice(idx, 1);
+    };
+  }
 
   publishDecision(event: ObsEvent): void {
     const payload = JSON.stringify(event);
     const ns = event.dry_run ? 'homerun/dev' : 'homerun';
     this.publish(`${ns}/events`, payload, false);
     this.publish(`${ns}/${event.location}/${event.subsystem}/decision`, payload, true);
+    for (const l of this.listeners) l(event);
   }
 
   publishActionEvent(event: ObsEvent): void {
     const ns = event.dry_run ? 'homerun/dev' : 'homerun';
     this.publish(`${ns}/events`, JSON.stringify(event), false);
+    for (const l of this.listeners) l(event);
   }
 
   private publish(topic: string, payload: string, retain: boolean): void {
