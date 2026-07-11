@@ -126,6 +126,62 @@ describe('Observability — publishActionEvent', () => {
   });
 });
 
+describe('Observability — publishLifecycle', () => {
+  let mqtt: MockMqtt;
+  let obs: Observability;
+
+  beforeEach(() => {
+    mqtt = makeMqtt();
+    obs = new Observability(mqtt as unknown as MqttClient);
+  });
+
+  it('publishes to homerun/lifecycle (not retained)', async () => {
+    obs.publishLifecycle('server_started', 5);
+    await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalled());
+
+    const call = callForTopic(mqtt, 'homerun/lifecycle')!;
+    expect(call).toBeDefined();
+    expect(call[2]).toMatchObject({ retain: false });
+    const payload = JSON.parse(call[1] as string);
+    expect(payload).toMatchObject({ schema: 'home.lifecycle.v1', type: 'server_started', automation_count: 5 });
+    expect(payload.dry_run).toBeUndefined();
+  });
+
+  it('publishes to homerun/status (retained) with online status', async () => {
+    obs.publishLifecycle('server_started', 5);
+    await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalledTimes(2));
+
+    const call = callForTopic(mqtt, 'homerun/status')!;
+    expect(call).toBeDefined();
+    expect(call[2]).toMatchObject({ retain: true });
+    expect(JSON.parse(call[1] as string)).toMatchObject({ status: 'online', automation_count: 5 });
+  });
+
+  it('routes dry_run lifecycle events to homerun/dev/* topics', async () => {
+    obs.publishLifecycle('rescan_complete', 3, true);
+    await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalledTimes(2));
+
+    expect(callForTopic(mqtt, 'homerun/dev/lifecycle')).toBeDefined();
+    expect(callForTopic(mqtt, 'homerun/dev/status')).toBeDefined();
+    expect(callForTopic(mqtt, 'homerun/lifecycle')).toBeUndefined();
+    expect(callForTopic(mqtt, 'homerun/status')).toBeUndefined();
+  });
+
+  it('includes dry_run flag in the lifecycle payload when true', async () => {
+    obs.publishLifecycle('ha_reconnected', 2, true);
+    await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalled());
+
+    const call = callForTopic(mqtt, 'homerun/dev/lifecycle')!;
+    expect(JSON.parse(call[1] as string).dry_run).toBe(true);
+  });
+
+  it('swallows MQTT publish failure and does not throw', async () => {
+    mqtt.publishAsync.mockRejectedValue(new Error('connection lost'));
+    expect(() => obs.publishLifecycle('server_started', 1)).not.toThrow();
+    await new Promise((r) => setTimeout(r, 0));
+  });
+});
+
 describe('Observability — subscribe', () => {
   let mqtt: MockMqtt;
   let obs: Observability;

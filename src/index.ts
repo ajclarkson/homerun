@@ -19,8 +19,14 @@ process.on('unhandledRejection', (reason) => {
   console.error('[homerun] unhandledRejection:', reason);
 });
 
+const dryRun = process.env.DRY_RUN === 'true';
+const lwtTopic = dryRun ? 'homerun/dev/status' : 'homerun/status';
+const lwtPayload = JSON.stringify({ status: 'offline', timestamp: new Date().toISOString() });
+
 // 1. Connect MQTT before anything else (Observability and ActionRuntime need it).
-const mqtt = connect(process.env.MQTT_URL!);
+const mqtt = connect(process.env.MQTT_URL!, {
+  will: { topic: lwtTopic, payload: lwtPayload, qos: 1, retain: true },
+});
 await new Promise<void>((resolve, reject) => {
   mqtt.once('connect', () => resolve());
   mqtt.once('error', reject);
@@ -39,7 +45,7 @@ const actionRuntime = new ActionRuntime({
   mqttClient: mqtt,
   timerManager,
   observability,
-  dryRun: process.env.DRY_RUN === 'true',
+  dryRun,
 });
 
 // 3. Initial automation load — must complete before the engine and scheduler start.
@@ -50,7 +56,7 @@ console.log(`[homerun] loaded ${registry.getAll().length} automation(s)`);
 
 // 4. Wire up the engine and scheduler.
 engine = new TriggerEngine(registry, haClient, (automation, event) => {
-  runPipeline(automation, event, haClient, { observability, actionRuntime, dryRun: process.env.DRY_RUN === 'true' }).catch((err: unknown) => {
+  runPipeline(automation, event, haClient, { observability, actionRuntime, dryRun }).catch((err: unknown) => {
     console.error('[homerun] pipeline error:', err);
   });
 }, mqtt);
@@ -64,7 +70,9 @@ startHotReload(automationsDir, registry);
 
 async function reload(): Promise<void> {
   await rescanAutomations(automationsDir, registry);
-  console.log(`[homerun] rescan complete — ${registry.getAll().length} automation(s) registered`);
+  const count = registry.getAll().length;
+  console.log(`[homerun] rescan complete — ${count} automation(s) registered`);
+  observability.publishLifecycle('rescan_complete', count, dryRun);
 }
 
 process.on('SIGUSR1', () => {
@@ -79,7 +87,7 @@ let haReady = false;
 const apiServer = new ApiServer({
   registry,
   onTrigger: (automation, event) => {
-    runPipeline(automation, event, haClient, { observability, actionRuntime, dryRun: process.env.DRY_RUN === 'true' }).catch((err: unknown) => {
+    runPipeline(automation, event, haClient, { observability, actionRuntime, dryRun }).catch((err: unknown) => {
       console.error('[homerun] pipeline error (http trigger):', err);
     });
   },
@@ -93,9 +101,11 @@ await apiServer.start(Number(process.env.API_PORT ?? 7070));
 // 7. Connect to HA last — state_changed events start flowing once ready resolves.
 haClient.on('reconnected', () => {
   console.log(`[homerun] reconnected — ${haClient.entityCount} entities refreshed`);
+  observability.publishLifecycle('ha_reconnected', registry.getAll().length, dryRun);
 });
 
 await haClient.connect(process.env.HA_URL!, process.env.HA_TOKEN!);
 await haClient.ready;
 haReady = true;
 console.log(`[homerun] ready — ${haClient.entityCount} entities cached`);
+observability.publishLifecycle('server_started', registry.getAll().length, dryRun);

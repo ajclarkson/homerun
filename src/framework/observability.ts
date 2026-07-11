@@ -16,6 +16,16 @@ export interface ObsEvent {
   timestamp: string;
 }
 
+export type LifecycleEventType = 'server_started' | 'rescan_complete' | 'ha_reconnected';
+
+export interface LifecycleEvent {
+  schema: 'home.lifecycle.v1';
+  type: LifecycleEventType;
+  automation_count: number;
+  timestamp: string;
+  dry_run?: boolean;
+}
+
 export class Observability {
   private readonly listeners: Array<(event: ObsEvent) => void> = [];
 
@@ -41,6 +51,20 @@ export class Observability {
     const ns = event.dry_run ? 'homerun/dev' : 'homerun';
     this.publish(`${ns}/events`, JSON.stringify(event), false);
     for (const l of this.listeners) l(event);
+  }
+
+  publishLifecycle(type: LifecycleEventType, automationCount: number, dryRun = false): void {
+    const event: LifecycleEvent = {
+      schema: 'home.lifecycle.v1',
+      type,
+      automation_count: automationCount,
+      timestamp: new Date().toISOString(),
+      ...(dryRun && { dry_run: true }),
+    };
+    const ns = dryRun ? 'homerun/dev' : 'homerun';
+    const payload = JSON.stringify(event);
+    this.publish(`${ns}/lifecycle`, payload, false);
+    this.publish(`${ns}/status`, JSON.stringify({ status: 'online', automation_count: automationCount, timestamp: event.timestamp }), true);
   }
 
   private publish(topic: string, payload: string, retain: boolean): void {
