@@ -24,7 +24,10 @@ export async function _reloadFile(
       platform: 'node',
       format: 'esm',
       write: false,
-      alias: { '@ajclarkson/homerun': path.resolve(import.meta.dirname, '../lib.js') },
+      alias: {
+        '@ajclarkson/homerun/testing': path.resolve(import.meta.dirname, '../testing.js'),
+        '@ajclarkson/homerun': path.resolve(import.meta.dirname, '../lib.js'),
+      },
     });
 
     const code = result.outputFiles[0].text;
@@ -59,7 +62,7 @@ export function startHotReload(automationsDir: string, registry: AutomationRegis
     ? path.join(automationsDir, `${process.env.AUTOMATION}.ts`)
     : `${automationsDir}/**/*.ts`;
 
-  watch(target, { ignoreInitial: true, ignored: /node_modules/ }).on('change', (filePath: string) => {
+  watch(target, { ignoreInitial: true, ignored: [/node_modules/, /\.test\.ts$/] }).on('change', (filePath: string) => {
     _reloadFile(filePath, registry).catch((err: unknown) => {
       console.error('[hot-reload] unexpected error:', err);
     });
