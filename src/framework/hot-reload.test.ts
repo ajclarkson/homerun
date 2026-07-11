@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { _reloadFile } from './hot-reload.js';
+import { _reloadFile, _deleteFile } from './hot-reload.js';
 import type { AutomationRegistry } from './registry.js';
 import type { Automation } from '../types/automation.js';
 
@@ -191,6 +191,37 @@ describe('_reloadFile — importer error', () => {
 
     expect(reg.register).toHaveBeenCalledTimes(1);
     expect(reg.getById('parlour:lighting')).toBe(existing);
+  });
+});
+
+// ---------- _deleteFile ----------
+
+describe('_deleteFile', () => {
+  it('unregisters all automations from the deleted file', () => {
+    const reg = makeRegistry();
+    const fileToIds = new Map<string, string[]>();
+    fileToIds.set('/automations/parlour-lighting.ts', ['parlour:lighting', 'parlour:heating']);
+
+    _deleteFile('/automations/parlour-lighting.ts', reg, fileToIds);
+
+    expect(reg.unregister).toHaveBeenCalledWith('parlour:lighting');
+    expect(reg.unregister).toHaveBeenCalledWith('parlour:heating');
+  });
+
+  it('removes the file from the tracking map', () => {
+    const reg = makeRegistry();
+    const fileToIds = new Map<string, string[]>();
+    fileToIds.set('/automations/parlour-lighting.ts', ['parlour:lighting']);
+
+    _deleteFile('/automations/parlour-lighting.ts', reg, fileToIds);
+
+    expect(fileToIds.has('/automations/parlour-lighting.ts')).toBe(false);
+  });
+
+  it('does nothing when the file was never tracked', () => {
+    const reg = makeRegistry();
+    _deleteFile('/automations/unknown.ts', reg, new Map());
+    expect(reg.unregister).not.toHaveBeenCalled();
   });
 });
 
