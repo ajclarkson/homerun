@@ -1,0 +1,13 @@
+meta {
+  name: Trigger automation
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/automations/{{automationId}}/trigger
+}
+
+vars:pre-request {
+  automationId: parlour:lighting
+}

@@ -3,3 +3,8 @@ dist/
 .env
 *.js.map
 .tmuxinator.yml
+
+# Bruno environment files — local.bru is committed as the baseline;
+# personal environments (e.g. with cluster URLs) stay local only.
+bruno/environments/*.bru
+!bruno/environments/local.bru
