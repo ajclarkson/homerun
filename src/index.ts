@@ -69,7 +69,7 @@ console.log(`[homerun] loaded ${registry.getAll().length} automation(s)`);
 
 // 4. Wire up the engine and scheduler.
 engine = new TriggerEngine(registry, haClient, (automation, event) => {
-  runPipeline(automation, event, haClient, { observability, actionRuntime }).catch((err: unknown) => {
+  runPipeline(automation, event, haClient, { observability, actionRuntime, dryRun: process.env.DRY_RUN === 'true' }).catch((err: unknown) => {
     console.error('[homerun] pipeline error:', err);
   });
 }, mqtt);
@@ -98,7 +98,7 @@ let haReady = false;
 const apiServer = new ApiServer({
   registry,
   onTrigger: (automation, event) => {
-    runPipeline(automation, event, haClient, { observability, actionRuntime }).catch((err: unknown) => {
+    runPipeline(automation, event, haClient, { observability, actionRuntime, dryRun: process.env.DRY_RUN === 'true' }).catch((err: unknown) => {
       console.error('[homerun] pipeline error (http trigger):', err);
     });
   },
