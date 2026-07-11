@@ -1,5 +1,4 @@
 import 'dotenv/config';
-import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { connect } from 'mqtt';
 import { HAClient } from './framework/ha-client.js';
@@ -9,7 +8,7 @@ import { TimerManager } from './framework/timer-manager.js';
 import { ActionRuntime } from './framework/action-runtime.js';
 import { TriggerEngine } from './framework/trigger-engine.js';
 import { Scheduler } from './framework/scheduler.js';
-import { _reloadFile, startHotReload } from './framework/hot-reload.js';
+import { rescanAutomations, startHotReload } from './framework/hot-reload.js';
 import { runPipeline } from './framework/pipeline.js';
 import { ApiServer } from './framework/api-server.js';
 
@@ -46,26 +45,7 @@ const actionRuntime = new ActionRuntime({
 // 3. Initial automation load — must complete before the engine and scheduler start.
 const automationsDir = path.resolve(process.env.AUTOMATIONS_DIR!);
 
-const isAutomation = (f: string) =>
-  f.endsWith('.ts') &&
-  !f.endsWith('.test.ts') &&
-  !f.includes('node_modules') &&
-  !f.includes('.d.ts') &&
-  !f.split(path.sep).includes('types');
-
-async function loadAutomations(): Promise<void> {
-  let files: string[] = [];
-  try {
-    files = (await readdir(automationsDir, { recursive: true })) as string[];
-  } catch {
-    console.warn(`[homerun] AUTOMATIONS_DIR not found: ${automationsDir} — starting with no automations`);
-  }
-  for (const file of files.filter(isAutomation)) {
-    await _reloadFile(path.join(automationsDir, file), registry);
-  }
-}
-
-await loadAutomations();
+await rescanAutomations(automationsDir, registry);
 console.log(`[homerun] loaded ${registry.getAll().length} automation(s)`);
 
 // 4. Wire up the engine and scheduler.
@@ -83,7 +63,7 @@ scheduler.start();
 startHotReload(automationsDir, registry);
 
 async function reload(): Promise<void> {
-  await loadAutomations();
+  await rescanAutomations(automationsDir, registry);
   console.log(`[homerun] rescan complete — ${registry.getAll().length} automation(s) registered`);
 }
 

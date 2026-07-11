@@ -1,17 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { _reloadFile, _deleteFile } from './hot-reload.js';
+import { _reloadFile, _deleteFile, rescanAutomations } from './hot-reload.js';
 import type { AutomationRegistry } from './registry.js';
 import type { Automation } from '../types/automation.js';
 
 // ---------- Module mocks (must be at top level) ----------
 
-const { mockBuild, mockWatch } = vi.hoisted(() => ({
+const { mockBuild, mockWatch, mockReaddir } = vi.hoisted(() => ({
   mockBuild: vi.fn(),
   mockWatch: vi.fn(),
+  mockReaddir: vi.fn(),
 }));
 
 vi.mock('esbuild', () => ({ build: mockBuild }));
 vi.mock('chokidar', () => ({ watch: mockWatch }));
+vi.mock('node:fs/promises', () => ({ readdir: mockReaddir }));
 
 // ---------- Helpers ----------
 
@@ -225,6 +227,79 @@ describe('_deleteFile', () => {
   });
 });
 
+// ---------- rescanAutomations ----------
+
+describe('rescanAutomations', () => {
+  beforeEach(() => {
+    mockBuild.mockClear();
+    mockBuild.mockResolvedValue(makeBuildResult());
+  });
+
+  it('registers automations from all current files', async () => {
+    const reg = makeRegistry();
+    const auto = makeAutomation('parlour:lighting');
+    const importer = makeImporter({ default: auto });
+    mockReaddir.mockResolvedValue(['parlour-lighting.ts']);
+
+    const fileToIds = new Map<string, string[]>();
+    await rescanAutomations('/automations', reg, fileToIds, importer);
+
+    expect(reg.register).toHaveBeenCalledWith(auto);
+  });
+
+  it('unregisters automations from files that no longer exist', async () => {
+    const reg = makeRegistry();
+    mockReaddir.mockResolvedValue(['parlour-lighting.ts']);
+    mockBuild.mockResolvedValue(makeBuildResult());
+
+    const fileToIds = new Map<string, string[]>();
+    fileToIds.set('/automations/deleted.ts', ['bedroom:lighting']);
+
+    await rescanAutomations('/automations', reg, fileToIds, makeImporter({ default: makeAutomation() }));
+
+    expect(reg.unregister).toHaveBeenCalledWith('bedroom:lighting');
+    expect(fileToIds.has('/automations/deleted.ts')).toBe(false);
+  });
+
+  it('re-registers automations from files that still exist', async () => {
+    const reg = makeRegistry();
+    const auto = makeAutomation('parlour:lighting');
+    mockReaddir.mockResolvedValue(['parlour-lighting.ts']);
+
+    const fileToIds = new Map<string, string[]>();
+    fileToIds.set('/automations/parlour-lighting.ts', ['parlour:lighting']);
+
+    await rescanAutomations('/automations', reg, fileToIds, makeImporter({ default: auto }));
+
+    expect(reg.register).toHaveBeenCalledWith(auto);
+  });
+
+  it('treats a missing AUTOMATIONS_DIR as an empty file list and purges all tracked automations', async () => {
+    const reg = makeRegistry();
+    mockReaddir.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+
+    const fileToIds = new Map<string, string[]>();
+    fileToIds.set('/automations/parlour-lighting.ts', ['parlour:lighting']);
+
+    await rescanAutomations('/automations', reg, fileToIds);
+
+    expect(reg.unregister).toHaveBeenCalledWith('parlour:lighting');
+  });
+
+  it('skips .test.ts files', async () => {
+    const reg = makeRegistry();
+    mockReaddir.mockResolvedValue(['parlour-lighting.ts', 'parlour-lighting.test.ts']);
+
+    const fileToIds = new Map<string, string[]>();
+    await rescanAutomations('/automations', reg, fileToIds, makeImporter({ default: makeAutomation() }));
+
+    expect(mockBuild).toHaveBeenCalledTimes(1);
+    expect(mockBuild).toHaveBeenCalledWith(expect.objectContaining({
+      entryPoints: ['/automations/parlour-lighting.ts'],
+    }));
+  });
+});
+
 // ---------- AUTOMATION env var scoping ----------
 
 describe('startHotReload — AUTOMATION env var', () => {
@@ -245,6 +320,13 @@ describe('startHotReload — AUTOMATION env var', () => {
     const reg = makeRegistry();
     startHotReload('/automations', reg);
     expect(mockWatch).toHaveBeenCalledWith('/automations/**/*.ts', expect.anything());
+  });
+
+  it('registers automations when a new file is added', async () => {
+    const { startHotReload } = await import('./hot-reload.js');
+    startHotReload('/automations', makeRegistry());
+    const handlers = mockWatcher.on.mock.calls.map((c: unknown[]) => c[0]);
+    expect(handlers).toContain('add');
   });
 
   it('ignores .test.ts files in the watcher', async () => {

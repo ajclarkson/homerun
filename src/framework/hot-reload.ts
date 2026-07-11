@@ -68,6 +68,42 @@ export function _deleteFile(
   fileToIds.delete(filePath);
 }
 
+const isAutomationFile = (f: string): boolean =>
+  f.endsWith('.ts') &&
+  !f.endsWith('.test.ts') &&
+  !f.includes('node_modules') &&
+  !f.includes('.d.ts') &&
+  !f.split(path.sep).includes('types');
+
+export async function rescanAutomations(
+  automationsDir: string,
+  registry: AutomationRegistry,
+  fileToIds: Map<string, string[]> = moduleFileToIds,
+  importer: Importer = defaultImporter,
+): Promise<void> {
+  let files: string[] = [];
+  try {
+    const { readdir } = await import('node:fs/promises');
+    files = (await readdir(automationsDir, { recursive: true })) as string[];
+  } catch {
+    console.warn(`[homerun] AUTOMATIONS_DIR not found: ${automationsDir} — starting with no automations`);
+  }
+
+  const currentPaths = new Set(
+    files.filter(isAutomationFile).map((f) => path.join(automationsDir, f)),
+  );
+
+  for (const trackedPath of [...fileToIds.keys()]) {
+    if (!currentPaths.has(trackedPath)) {
+      _deleteFile(trackedPath, registry, fileToIds);
+    }
+  }
+
+  for (const filePath of currentPaths) {
+    await _reloadFile(filePath, registry, importer, fileToIds);
+  }
+}
+
 export function startHotReload(automationsDir: string, registry: AutomationRegistry): void {
   const target = process.env.AUTOMATION
     ? path.join(automationsDir, `${process.env.AUTOMATION}.ts`)
@@ -75,11 +111,14 @@ export function startHotReload(automationsDir: string, registry: AutomationRegis
 
   const watcher = watch(target, { ignoreInitial: true, ignored: [/node_modules/, /\.test\.ts$/] });
 
-  watcher.on('change', (filePath: string) => {
+  const reload = (filePath: string): void => {
     _reloadFile(filePath, registry).catch((err: unknown) => {
       console.error('[hot-reload] unexpected error:', err);
     });
-  });
+  };
+
+  watcher.on('add', reload);
+  watcher.on('change', reload);
 
   watcher.on('unlink', (filePath: string) => {
     _deleteFile(filePath, registry);
