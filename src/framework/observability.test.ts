@@ -125,3 +125,60 @@ describe('Observability — publishActionEvent', () => {
     await new Promise((r) => setTimeout(r, 0));
   });
 });
+
+describe('Observability — subscribe', () => {
+  let mqtt: MockMqtt;
+  let obs: Observability;
+
+  beforeEach(() => {
+    mqtt = makeMqtt();
+    obs = new Observability(mqtt as unknown as MqttClient);
+  });
+
+  it('listener receives events published via publishDecision', () => {
+    const listener = vi.fn();
+    obs.subscribe(listener);
+    const event = makeDecisionEvent();
+    obs.publishDecision(event);
+    expect(listener).toHaveBeenCalledOnce();
+    expect(listener).toHaveBeenCalledWith(event);
+  });
+
+  it('listener receives events published via publishActionEvent', () => {
+    const listener = vi.fn();
+    obs.subscribe(listener);
+    const event = makeDecisionEvent({ type: 'action_started' });
+    obs.publishActionEvent(event);
+    expect(listener).toHaveBeenCalledOnce();
+    expect(listener).toHaveBeenCalledWith(event);
+  });
+
+  it('multiple listeners all receive the event', () => {
+    const l1 = vi.fn();
+    const l2 = vi.fn();
+    obs.subscribe(l1);
+    obs.subscribe(l2);
+    obs.publishDecision(makeDecisionEvent());
+    expect(l1).toHaveBeenCalledOnce();
+    expect(l2).toHaveBeenCalledOnce();
+  });
+
+  it('unsubscribe removes the listener', () => {
+    const listener = vi.fn();
+    const unsubscribe = obs.subscribe(listener);
+    unsubscribe();
+    obs.publishDecision(makeDecisionEvent());
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('unsubscribing one listener does not affect others', () => {
+    const l1 = vi.fn();
+    const l2 = vi.fn();
+    const unsub1 = obs.subscribe(l1);
+    obs.subscribe(l2);
+    unsub1();
+    obs.publishDecision(makeDecisionEvent());
+    expect(l1).not.toHaveBeenCalled();
+    expect(l2).toHaveBeenCalledOnce();
+  });
+});
