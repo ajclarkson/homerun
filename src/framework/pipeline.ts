@@ -8,6 +8,7 @@ import type { ActionRuntime } from './action-runtime.js';
 interface Deps {
   observability: Observability;
   actionRuntime: ActionRuntime;
+  dryRun?: boolean;
 }
 
 export async function runPipeline(
@@ -26,6 +27,7 @@ export async function runPipeline(
     location: automation.location,
     subsystem: automation.subsystem,
     timestamp,
+    ...(deps.dryRun ? { dry_run: true } : {}),
   };
 
   // Step 2: Context

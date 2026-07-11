@@ -185,3 +185,34 @@ describe('runPipeline — exception in reduce', () => {
     expect(event.reason).toBe('unhandled_error');
   });
 });
+
+// ---------- Dry-run mode ----------
+
+describe('runPipeline — dry-run mode', () => {
+  it('sets dry_run: true on decision events when dryRun dep is true', async () => {
+    const deps = { ...makeDeps(), dryRun: true };
+    const ha = makeHAClient();
+    const auto = makeAutomation();
+    await runPipeline(auto, onStartEvent, ha as never, deps as never);
+    const [event] = deps.observability.publishDecision.mock.calls[0] as [Record<string, unknown>];
+    expect(event.dry_run).toBe(true);
+  });
+
+  it('does not set dry_run on decision events when dryRun dep is false', async () => {
+    const deps = { ...makeDeps(), dryRun: false };
+    const ha = makeHAClient();
+    const auto = makeAutomation();
+    await runPipeline(auto, onStartEvent, ha as never, deps as never);
+    const [event] = deps.observability.publishDecision.mock.calls[0] as [Record<string, unknown>];
+    expect(event.dry_run).toBeUndefined();
+  });
+
+  it('sets dry_run: true on abort events when dryRun dep is true', async () => {
+    const deps = { ...makeDeps(), dryRun: true };
+    const ha = makeHAClient();
+    const auto = makeAutomation({ context: vi.fn().mockReturnValue(abort('guard_failed')) });
+    await runPipeline(auto, onStartEvent, ha as never, deps as never);
+    const [event] = deps.observability.publishDecision.mock.calls[0] as [Record<string, unknown>];
+    expect(event.dry_run).toBe(true);
+  });
+});
