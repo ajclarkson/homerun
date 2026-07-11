@@ -57,14 +57,31 @@ export async function _reloadFile(
   }
 }
 
+export function _deleteFile(
+  filePath: string,
+  registry: AutomationRegistry,
+  fileToIds: Map<string, string[]> = moduleFileToIds,
+): void {
+  for (const id of fileToIds.get(filePath) ?? []) {
+    registry.unregister(id);
+  }
+  fileToIds.delete(filePath);
+}
+
 export function startHotReload(automationsDir: string, registry: AutomationRegistry): void {
   const target = process.env.AUTOMATION
     ? path.join(automationsDir, `${process.env.AUTOMATION}.ts`)
     : `${automationsDir}/**/*.ts`;
 
-  watch(target, { ignoreInitial: true, ignored: [/node_modules/, /\.test\.ts$/] }).on('change', (filePath: string) => {
+  const watcher = watch(target, { ignoreInitial: true, ignored: [/node_modules/, /\.test\.ts$/] });
+
+  watcher.on('change', (filePath: string) => {
     _reloadFile(filePath, registry).catch((err: unknown) => {
       console.error('[hot-reload] unexpected error:', err);
     });
+  });
+
+  watcher.on('unlink', (filePath: string) => {
+    _deleteFile(filePath, registry);
   });
 }
