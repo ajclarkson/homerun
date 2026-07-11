@@ -95,6 +95,7 @@ const apiServer = new ApiServer({
   isReady: () => haReady,
   entityCount: () => haClient.entityCount,
   observability,
+  dryRun,
 });
 await apiServer.start(Number(process.env.API_PORT ?? 7070));
 

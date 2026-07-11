@@ -177,6 +177,24 @@ describe('ApiServer', () => {
       const body = await res.json() as Record<string, unknown>;
       expect(body.status).toBe('starting');
     });
+
+    it('omits dry_run from the response when not in dry-run mode', async () => {
+      const res = await get(port, '/health/ready');
+      const body = await res.json() as Record<string, unknown>;
+      expect(body.dry_run).toBeUndefined();
+    });
+
+    it('includes dry_run: true in the response when in dry-run mode', async () => {
+      const dryServer = new ApiServer({ registry, onTrigger, onReload, isReady, entityCount, observability: obs, dryRun: true });
+      await dryServer.start(0);
+      try {
+        const res = await get(dryServer.port!, '/health/ready');
+        const body = await res.json() as Record<string, unknown>;
+        expect(body.dry_run).toBe(true);
+      } finally {
+        await dryServer.stop();
+      }
+    });
   });
 
   // ---------- GET /events ----------
