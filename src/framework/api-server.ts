@@ -3,7 +3,7 @@ import type { Server } from 'node:http';
 import type { AutomationRegistry } from './registry.js';
 import type { Observability, ObsEvent } from './observability.js';
 import type { Automation } from '../types/automation.js';
-import type { TriggerEvent } from '../types/triggers.js';
+import type { Trigger, TriggerEvent } from '../types/triggers.js';
 
 export interface ApiServerDeps {
   registry: AutomationRegistry;
@@ -66,7 +66,7 @@ export class ApiServer {
       id: a.id,
       location: a.location,
       subsystem: a.subsystem,
-      triggerTypes: a.triggers.map((t) => t.type),
+      triggers: a.triggers.map(serializeTrigger),
     }));
     json(res, 200, automations);
   }
@@ -121,6 +121,13 @@ export class ApiServer {
 
     req.on('close', unsubscribe);
   }
+}
+
+function serializeTrigger(trigger: Trigger): unknown {
+  if (trigger.type === 'state_changed' && trigger.entity instanceof RegExp) {
+    return { ...trigger, entity: trigger.entity.toString() };
+  }
+  return trigger;
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {

@@ -74,7 +74,7 @@ describe('ApiServer', () => {
       expect(await res.json()).toEqual([]);
     });
 
-    it('returns registered automations with id, location, subsystem, and triggerTypes', async () => {
+    it('returns registered automations with id, location, subsystem, and full triggers', async () => {
       registry.register(makeAutomation('parlour:lighting'));
       const res = await get(port, '/automations');
       const body = await res.json() as unknown[];
@@ -83,8 +83,22 @@ describe('ApiServer', () => {
         id: 'parlour:lighting',
         location: 'parlour',
         subsystem: 'lighting',
-        triggerTypes: ['on_start', 'schedule'],
+        triggers: [
+          { type: 'on_start' },
+          { type: 'schedule', cron: '0 * * * *' },
+        ],
       });
+    });
+
+    it('serialises RegExp entity as a string in state_changed triggers', async () => {
+      registry.register(makeAutomation('kitchen:heating', {
+        location: 'kitchen',
+        subsystem: 'heating',
+        triggers: [{ type: 'state_changed', entity: /^sensor\.kitchen_/ }],
+      }));
+      const res = await get(port, '/automations');
+      const body = await res.json() as Array<{ triggers: unknown[] }>;
+      expect(body[0].triggers[0]).toEqual({ type: 'state_changed', entity: '/^sensor\\.kitchen_/' });
     });
 
     it('returns all registered automations', async () => {
