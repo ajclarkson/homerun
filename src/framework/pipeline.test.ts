@@ -83,7 +83,7 @@ describe('runPipeline — happy path', () => {
       automation_id: 'parlour:lighting',
       location: 'parlour',
       subsystem: 'lighting',
-      type: 'decision',
+      event_type: 'decision',
       decision: 'lights_on',
     });
   });
@@ -130,7 +130,7 @@ describe('runPipeline — abort from context', () => {
     await runPipeline(auto, onStartEvent, ha as never, deps as never);
     expect(auto.reduce).not.toHaveBeenCalled();
     const [event] = deps.observability.publishDecision.mock.calls[0] as [Record<string, unknown>];
-    expect(event.type).toBe('abort');
+    expect(event.event_type).toBe('abort');
     expect(event.reason).toBe('guard_failed');
   });
 
@@ -152,7 +152,7 @@ describe('runPipeline — exception in context', () => {
     const auto = makeAutomation({ context: vi.fn().mockImplementation(() => { throw new Error('boom'); }) });
     await runPipeline(auto, onStartEvent, ha as never, deps as never);
     const [event] = deps.observability.publishDecision.mock.calls[0] as [Record<string, unknown>];
-    expect(event.type).toBe('abort');
+    expect(event.event_type).toBe('abort');
     expect(event.reason).toBe('unhandled_error');
   });
 
@@ -181,7 +181,7 @@ describe('runPipeline — exception in reduce', () => {
     const auto = makeAutomation({ reduce: vi.fn().mockImplementation(() => { throw new Error('reduce failed'); }) });
     await runPipeline(auto, onStartEvent, ha as never, deps as never);
     const [event] = deps.observability.publishDecision.mock.calls[0] as [Record<string, unknown>];
-    expect(event.type).toBe('abort');
+    expect(event.event_type).toBe('abort');
     expect(event.reason).toBe('unhandled_error');
   });
 });

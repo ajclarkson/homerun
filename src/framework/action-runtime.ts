@@ -69,7 +69,7 @@ export class ActionRuntime {
 
   private makeEvent(
     ctx: ExecutionContext,
-    type: ObsEvent['type'],
+    event_type: ObsEvent['event_type'],
     action: Action,
     extra: Partial<ObsEvent> = {},
   ): ObsEvent {
@@ -79,7 +79,7 @@ export class ActionRuntime {
       automation_id: ctx.automationId,
       location: ctx.location,
       subsystem: ctx.subsystem,
-      type,
+      event_type,
       actions: [action],
       timestamp: new Date().toISOString(),
       ...(this.deps.dryRun ? { dry_run: true } : {}),
