@@ -41,7 +41,7 @@ describe('ActionRuntime — ha.call_service', () => {
     const rt = new ActionRuntime(deps as never);
     const action: Action = { type: 'ha.call_service', domain: 'light', service: 'turn_off' };
     await rt.execute([action], makeCtx());
-    const calls = deps.observability.publishActionEvent.mock.calls.map((c: unknown[]) => (c[0] as { type: string }).type);
+    const calls = deps.observability.publishActionEvent.mock.calls.map((c: unknown[]) => (c[0] as { event_type: string }).event_type);
     expect(calls).toEqual(['action_started', 'action_result']);
   });
 
@@ -60,8 +60,8 @@ describe('ActionRuntime — ha.call_service', () => {
       { type: 'timer.cancel', timerKey: 'parlour:lighting:off-delay' },
     ];
     await rt.execute(actions, makeCtx());
-    const result = deps.observability.publishActionEvent.mock.calls[1][0] as { type: string; reason: string };
-    expect(result.type).toBe('action_result');
+    const result = deps.observability.publishActionEvent.mock.calls[1][0] as { event_type: string; reason: string };
+    expect(result.event_type).toBe('action_result');
     expect(result.reason).toContain('HA unavailable');
     expect(deps.timerManager.cancel).toHaveBeenCalled();
   });
@@ -114,8 +114,8 @@ describe('ActionRuntime — unknown action type', () => {
     const deps = makeDeps();
     const rt = new ActionRuntime(deps as never);
     await rt.execute([{ type: 'unknown.action' } as never], makeCtx());
-    const result = deps.observability.publishActionEvent.mock.calls[1][0] as { type: string; reason: string };
-    expect(result.type).toBe('action_result');
+    const result = deps.observability.publishActionEvent.mock.calls[1][0] as { event_type: string; reason: string };
+    expect(result.event_type).toBe('action_result');
     expect(result.reason).toContain('unknown.action');
   });
 });
@@ -152,7 +152,7 @@ describe('ActionRuntime — dry-run mode', () => {
   it('still emits action_started and action_result with dry_run: true', async () => {
     const rt = new ActionRuntime(deps as never);
     await rt.execute([{ type: 'ha.call_service', domain: 'light', service: 'turn_on' }], makeCtx());
-    const events = deps.observability.publishActionEvent.mock.calls.map((c: unknown[]) => c[0] as { type: string; dry_run: boolean });
+    const events = deps.observability.publishActionEvent.mock.calls.map((c: unknown[]) => c[0] as { event_type: string; dry_run: boolean });
     expect(events).toHaveLength(2);
     expect(events.every((e) => e.dry_run === true)).toBe(true);
   });

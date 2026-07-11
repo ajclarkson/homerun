@@ -94,7 +94,7 @@ describe('Pipeline isolation — throwing context', () => {
 
     await vi.waitFor(() => expect(h.obs.publishDecision).toHaveBeenCalledTimes(2));
 
-    const types = h.obs.publishDecision.mock.calls.map((c) => (c[0] as { type: string }).type);
+    const types = h.obs.publishDecision.mock.calls.map((c) => (c[0] as { event_type: string }).event_type);
     expect(types).toContain('abort');
     expect(types).toContain('decision');
     expect(healthy.reduce).toHaveBeenCalled();
@@ -118,11 +118,11 @@ describe('Pipeline isolation — throwing reduce', () => {
 
     h.emitStateChange('binary_sensor.motion');
     await vi.waitFor(() => expect(h.obs.publishDecision).toHaveBeenCalledTimes(1));
-    expect((h.obs.publishDecision.mock.calls[0][0] as { type: string }).type).toBe('abort');
+    expect((h.obs.publishDecision.mock.calls[0][0] as { event_type: string }).event_type).toBe('abort');
 
     h.emitStateChange('binary_sensor.motion');
     await vi.waitFor(() => expect(h.obs.publishDecision).toHaveBeenCalledTimes(2));
-    expect((h.obs.publishDecision.mock.calls[1][0] as { type: string }).type).toBe('decision');
+    expect((h.obs.publishDecision.mock.calls[1][0] as { event_type: string }).event_type).toBe('decision');
   });
 });
 
@@ -162,7 +162,7 @@ describe('Async fault tolerance', () => {
       await vi.waitFor(() => expect(h.obs.publishDecision).toHaveBeenCalledTimes(1));
     }).not.toThrow();
 
-    expect((h.obs.publishDecision.mock.calls[0][0] as { type: string }).type).toBe('abort');
+    expect((h.obs.publishDecision.mock.calls[0][0] as { event_type: string }).event_type).toBe('abort');
   });
 
   it('a hanging action runtime does not block a concurrent pipeline for another automation', async () => {
@@ -218,7 +218,7 @@ describe('State cache gate', () => {
     h.emitStateChange('binary_sensor.motion');
 
     await vi.waitFor(() => expect(h.obs.publishDecision).toHaveBeenCalledTimes(1));
-    expect((h.obs.publishDecision.mock.calls[0][0] as { type: string }).type).toBe('decision');
+    expect((h.obs.publishDecision.mock.calls[0][0] as { event_type: string }).event_type).toBe('decision');
   });
 });
 
@@ -244,7 +244,7 @@ describe('Reconnect cycle', () => {
     // After reconnect, normal dispatch resumes
     h.emitStateChange('binary_sensor.motion');
     await vi.waitFor(() => expect(h.obs.publishDecision).toHaveBeenCalledTimes(1));
-    expect((h.obs.publishDecision.mock.calls[0][0] as { type: string }).type).toBe('decision');
+    expect((h.obs.publishDecision.mock.calls[0][0] as { event_type: string }).event_type).toBe('decision');
   });
 });
 
@@ -273,8 +273,8 @@ describe('Sustained fault', () => {
     const healthyDecisions = decisions.filter((d) => d.automation_id === 'kitchen:lights');
 
     expect(faultingDecisions).toHaveLength(N);
-    expect(faultingDecisions.every((d) => d.type === 'abort')).toBe(true);
+    expect(faultingDecisions.every((d) => d.event_type === 'abort')).toBe(true);
     expect(healthyDecisions).toHaveLength(N);
-    expect(healthyDecisions.every((d) => d.type === 'decision')).toBe(true);
+    expect(healthyDecisions.every((d) => d.event_type === 'decision')).toBe(true);
   });
 });

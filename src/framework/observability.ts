@@ -7,7 +7,7 @@ export interface ObsEvent {
   automation_id: string;
   location: string;
   subsystem: string;
-  type: 'decision' | 'abort' | 'action_started' | 'action_result';
+  event_type: 'decision' | 'abort' | 'action_started' | 'action_result';
   decision?: string;
   reason?: string;
   inputs?: Record<string, unknown>;

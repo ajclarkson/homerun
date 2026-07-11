@@ -12,6 +12,7 @@ export interface ApiServerDeps {
   isReady: () => boolean;
   entityCount: () => number;
   observability: Observability;
+  dryRun?: boolean;
 }
 
 export class ApiServer {
@@ -102,6 +103,7 @@ export class ApiServer {
       status: 'ready',
       entities: this.deps.entityCount(),
       automations: this.deps.registry.getAll().length,
+      ...(this.deps.dryRun && { dry_run: true }),
     });
   }
 

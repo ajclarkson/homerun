@@ -20,7 +20,7 @@ export async function runPipeline(
   const correlationId = event.correlation_id;
   const timestamp = new Date().toISOString();
 
-  const base: Omit<ObsEvent, 'type' | 'decision' | 'reason' | 'actions' | 'inputs'> = {
+  const base: Omit<ObsEvent, 'event_type' | 'decision' | 'reason' | 'actions' | 'inputs'> = {
     schema: 'home.events.v1',
     correlation_id: correlationId,
     automation_id: automation.id,
@@ -35,12 +35,12 @@ export async function runPipeline(
   try {
     ctx = automation.context(haClient.state, haClient.context, event);
   } catch {
-    deps.observability.publishDecision({ ...base, type: 'abort', reason: 'unhandled_error' });
+    deps.observability.publishDecision({ ...base, event_type: 'abort', reason: 'unhandled_error' });
     return;
   }
 
   if (isAbort(ctx)) {
-    deps.observability.publishDecision({ ...base, type: 'abort', reason: ctx.reason });
+    deps.observability.publishDecision({ ...base, event_type: 'abort', reason: ctx.reason });
     return;
   }
 
@@ -49,7 +49,7 @@ export async function runPipeline(
   try {
     result = automation.reduce(ctx);
   } catch {
-    deps.observability.publishDecision({ ...base, type: 'abort', reason: 'unhandled_error' });
+    deps.observability.publishDecision({ ...base, event_type: 'abort', reason: 'unhandled_error' });
     return;
   }
 
@@ -57,7 +57,7 @@ export async function runPipeline(
   const actions = result.actions ?? [];
   const decision: ObsEvent = {
     ...base,
-    type: 'decision',
+    event_type: 'decision',
     decision: result.decision,
     reason: result.reason,
     inputs: result.inputs,
