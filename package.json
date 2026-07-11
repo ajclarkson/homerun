@@ -30,8 +30,12 @@
     "homerun": "./dist/src/index.js",
     "homerun-generate-ha-types": "./dist/scripts/generate-ha-types.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ajclarkson/homerun"
+  },
   "keywords": [],
-  "author": "",
+  "author": "Adam Clarkson",
   "license": "MIT",
   "dependencies": {
     "chokidar": "^5.0.0",
