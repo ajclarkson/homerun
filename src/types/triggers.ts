@@ -8,7 +8,7 @@ export type Trigger =
   | { type: 'schedule'; cron: string }
   | { type: 'on_start' }
   | { type: 'timer_expired'; timerKey: string }
-  | { type: 'button'; entity: string; gesture: 'single_press' | 'double_press' | 'hold'; button?: string }
+  | { type: 'button'; entity: string | RegExp; gesture: 'single_press' | 'double_press' | 'hold'; button?: string }
   | { type: 'mqtt_in'; topic: string };
 
 // ---------- Trigger events ----------

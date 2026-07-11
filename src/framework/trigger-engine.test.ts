@@ -530,6 +530,85 @@ describe('TriggerEngine', () => {
     });
   });
 
+  // ---------- button regex entity ----------
+
+  describe('button regex entity', () => {
+    it('fires for any entity matching a regex pattern', async () => {
+      const { client, resolveReady, emitStateChanged } = makeMockHAClient();
+      const onMatch = vi.fn();
+      const registry = makeRegistry(
+        makeAutomation('a', [{ type: 'button', entity: /^sensor\.bedroom_button_.*_action$/, gesture: 'hold' }]),
+      );
+
+      const engine = new TriggerEngine(registry, client, onMatch);
+      engine.start();
+      resolveReady();
+      await vi.runAllTimersAsync();
+
+      emitStateChanged({ entity_id: 'sensor.bedroom_button_adam_action', old_state: undefined, new_state: makeEntityState('hold', 'sensor.bedroom_button_adam_action'), correlation_id: 'test-cid' });
+      expect(onMatch).toHaveBeenCalledOnce();
+      expect(onMatch).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ type: 'button', gesture: 'hold', entity_id: 'sensor.bedroom_button_adam_action' }));
+    });
+
+    it('fires for multiple entities matching the same pattern', async () => {
+      const { client, resolveReady, emitStateChanged } = makeMockHAClient();
+      const onMatch = vi.fn();
+      const registry = makeRegistry(
+        makeAutomation('a', [{ type: 'button', entity: /^sensor\.bedroom_button_.*_action$/, gesture: 'hold' }]),
+      );
+
+      const engine = new TriggerEngine(registry, client, onMatch);
+      engine.start();
+      resolveReady();
+      await vi.runAllTimersAsync();
+
+      emitStateChanged({ entity_id: 'sensor.bedroom_button_adam_action', old_state: undefined, new_state: makeEntityState('hold', 'sensor.bedroom_button_adam_action'), correlation_id: 'cid-1' });
+      emitStateChanged({ entity_id: 'sensor.bedroom_button_wall_action', old_state: undefined, new_state: makeEntityState('hold', 'sensor.bedroom_button_wall_action'), correlation_id: 'cid-2' });
+      expect(onMatch).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not route non-matching entities through the button handler', async () => {
+      const { client, resolveReady, emitStateChanged } = makeMockHAClient();
+      const onMatch = vi.fn();
+      const registry = makeRegistry(
+        makeAutomation('a', [
+          { type: 'button', entity: /^sensor\.bedroom_button_.*_action$/, gesture: 'hold' },
+          { type: 'state_changed', entity: 'sensor.other' },
+        ]),
+      );
+
+      const engine = new TriggerEngine(registry, client, onMatch);
+      engine.start();
+      resolveReady();
+      await vi.runAllTimersAsync();
+
+      emitStateChanged({ entity_id: 'sensor.other', old_state: undefined, new_state: makeEntityState('on', 'sensor.other'), correlation_id: 'test-cid' });
+      expect(onMatch).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ type: 'state_changed' }));
+    });
+
+    it('respects double_press window for regex-matched entities', async () => {
+      const { client, resolveReady, emitStateChanged } = makeMockHAClient();
+      const onMatch = vi.fn();
+      const registry = makeRegistry(
+        makeAutomation('a', [
+          { type: 'button', entity: /^sensor\.bedroom_button_.*_action$/, gesture: 'single_press' },
+          { type: 'button', entity: /^sensor\.bedroom_button_.*_action$/, gesture: 'double_press' },
+        ]),
+      );
+
+      const engine = new TriggerEngine(registry, client, onMatch);
+      engine.start();
+      resolveReady();
+      await vi.runAllTimersAsync();
+
+      emitStateChanged({ entity_id: 'sensor.bedroom_button_adam_action', old_state: undefined, new_state: makeEntityState('short_press', 'sensor.bedroom_button_adam_action'), correlation_id: 'cid-1' });
+      expect(onMatch).not.toHaveBeenCalled();
+      emitStateChanged({ entity_id: 'sensor.bedroom_button_adam_action', old_state: undefined, new_state: makeEntityState('short_press', 'sensor.bedroom_button_adam_action'), correlation_id: 'cid-2' });
+      expect(onMatch).toHaveBeenCalledOnce();
+      expect(onMatch).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ gesture: 'double_press' }));
+    });
+  });
+
   // ---------- button handler hot-reload ----------
 
   describe('button handler hot-reload', () => {
