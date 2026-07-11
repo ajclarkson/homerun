@@ -3,7 +3,7 @@ import type { TriggerEvent } from './types/triggers.js';
 import type { HAContext } from './framework/ha-client.js';
 import { isAbort } from './types/automation.js';
 
-type TestStateEntry = { state: string; attributes?: Record<string, unknown> };
+type TestStateEntry = { state: string; attributes?: Record<string, unknown>; last_changed?: string; last_updated?: string };
 
 interface TestOptions {
   event: TriggerEvent;
@@ -24,8 +24,8 @@ export function testAutomation<C>(
       entity_id: entityId,
       state: entry.state,
       attributes: entry.attributes ?? {},
-      last_changed: '',
-      last_updated: '',
+      last_changed: entry.last_changed ?? '',
+      last_updated: entry.last_updated ?? '',
     };
   };
 
