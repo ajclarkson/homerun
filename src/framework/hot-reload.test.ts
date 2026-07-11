@@ -130,6 +130,18 @@ describe('_reloadFile — happy path', () => {
       write: false,
     }));
   });
+
+  it('includes a separate alias for @ajclarkson/homerun/testing to avoid subpath resolving as a directory', async () => {
+    const reg = makeRegistry();
+    const importer = makeImporter({ default: makeAutomation() });
+
+    await _reloadFile('/automations/parlour-lighting.ts', reg, importer);
+
+    const { alias } = mockBuild.mock.calls[0][0] as { alias: Record<string, string> };
+    expect(alias['@ajclarkson/homerun/testing']).toBeDefined();
+    expect(alias['@ajclarkson/homerun/testing']).not.toContain('lib.js');
+    expect(alias['@ajclarkson/homerun']).toBeDefined();
+  });
 });
 
 describe('_reloadFile — build error', () => {
@@ -202,6 +214,15 @@ describe('startHotReload — AUTOMATION env var', () => {
     const reg = makeRegistry();
     startHotReload('/automations', reg);
     expect(mockWatch).toHaveBeenCalledWith('/automations/**/*.ts', expect.anything());
+  });
+
+  it('ignores .test.ts files in the watcher', async () => {
+    const { startHotReload } = await import('./hot-reload.js');
+    startHotReload('/automations', makeRegistry());
+    const [, options] = mockWatch.mock.calls[0] as [unknown, { ignored: unknown[] }];
+    const ignored = options.ignored as Array<RegExp | unknown>;
+    const testTsPattern = ignored.find((p) => p instanceof RegExp && p.test('foo.test.ts'));
+    expect(testTsPattern).toBeDefined();
   });
 
   it('watches only the named file when AUTOMATION is set', async () => {

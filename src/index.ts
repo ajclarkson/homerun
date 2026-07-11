@@ -48,6 +48,7 @@ const automationsDir = path.resolve(process.env.AUTOMATIONS_DIR!);
 
 const isAutomation = (f: string) =>
   f.endsWith('.ts') &&
+  !f.endsWith('.test.ts') &&
   !f.includes('node_modules') &&
   !f.includes('.d.ts') &&
   !f.split(path.sep).includes('types');
