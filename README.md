@@ -131,6 +131,7 @@ const ctx = kitchenLights.context(mockState, mockHAContext);
 | `on_start` | The system is ready and the state cache is fully populated. |
 | `timer_expired` | A named timer set by a previous `timer.start` action expires. |
 | `button` | A Zigbee button entity emits a `single_press`, `double_press`, or `hold` gesture. |
+| `mqtt_in` | A message arrives on a subscribed MQTT topic. |
 
 ```typescript
 triggers: [
@@ -192,7 +193,7 @@ Every pipeline run publishes a decision snapshot to MQTT — whether it complete
   "automation_id": "kitchen:lighting",
   "location": "kitchen",
   "subsystem": "lighting",
-  "type": "decision",
+  "event_type": "decision",
   "decision": "lights_on",
   "inputs": { "motion": true, "lux": 20, "luxThreshold": 40 },
   "actions": [{ "type": "ha.call_service", "domain": "light", "service": "turn_on" }],
@@ -227,6 +228,21 @@ npm test
 ```
 
 Set `DRY_RUN=true` to run the full pipeline — context, reduce, observability — without making any HA service calls. This is the default for local development.
+
+---
+
+## API
+
+The server exposes an HTTP API on port `7070` by default.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health/live` | Always returns `200 { status: "live" }` — used for liveness probes. |
+| `GET` | `/health/ready` | Returns `200` when the HA state cache is populated and automations are loaded, `503` while starting. Response includes `entities`, `automations` counts, and `dry_run: true` if running in dry-run mode. |
+| `GET` | `/automations` | Lists all registered automations with their `id`, `location`, `subsystem`, and trigger types. |
+| `POST` | `/automations/:id/trigger` | Manually fires an `on_start` event for the given automation. |
+| `POST` | `/reload` | Rescans the automations directory and hot-reloads changed files. |
+| `GET` | `/events` | Server-sent event stream of all pipeline decisions and action events in real time. |
 
 ---
 
