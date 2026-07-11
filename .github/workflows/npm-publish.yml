@@ -26,8 +26,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Test
+        run: npm run test:run
+
       - name: Build
         run: npm run build
+
+      - name: Set edge version
+        run: |
+          BASE=$(node -p "require('./package.json').version.split('-')[0]")
+          SHA=$(git rev-parse --short HEAD)
+          npm version "${BASE}-edge.${SHA}" --no-git-tag-version
 
       - name: Publish edge
         run: npm publish --tag edge --provenance --access public
