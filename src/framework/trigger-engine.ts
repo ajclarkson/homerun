@@ -4,7 +4,7 @@ import type { Trigger, TriggerEvent } from '../types/triggers.js';
 import type { HAClient, StateChangedEvent } from './ha-client.js';
 import type { AutomationRegistry } from './registry.js';
 
-const DOUBLE_PRESS_WINDOW_MS = 400;
+const DOUBLE_PRESS_WINDOW_MS = 250;
 
 // ---------- Button gesture handler ----------
 
