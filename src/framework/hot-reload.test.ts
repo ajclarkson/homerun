@@ -298,6 +298,32 @@ describe('rescanAutomations', () => {
       entryPoints: ['/automations/parlour-lighting.ts'],
     }));
   });
+
+  it('skips files under a types/ directory', async () => {
+    const reg = makeRegistry();
+    mockReaddir.mockResolvedValue(['parlour-lighting.ts', 'types/ha-entities.ts']);
+
+    const fileToIds = new Map<string, string[]>();
+    await rescanAutomations('/automations', reg, fileToIds, makeImporter({ default: makeAutomation() }));
+
+    expect(mockBuild).toHaveBeenCalledTimes(1);
+    expect(mockBuild).toHaveBeenCalledWith(expect.objectContaining({
+      entryPoints: ['/automations/parlour-lighting.ts'],
+    }));
+  });
+
+  it('skips files under a lib/ directory', async () => {
+    const reg = makeRegistry();
+    mockReaddir.mockResolvedValue(['parlour-lighting.ts', 'lib/lighting-controller-factory.ts']);
+
+    const fileToIds = new Map<string, string[]>();
+    await rescanAutomations('/automations', reg, fileToIds, makeImporter({ default: makeAutomation() }));
+
+    expect(mockBuild).toHaveBeenCalledTimes(1);
+    expect(mockBuild).toHaveBeenCalledWith(expect.objectContaining({
+      entryPoints: ['/automations/parlour-lighting.ts'],
+    }));
+  });
 });
 
 // ---------- AUTOMATION env var scoping ----------
