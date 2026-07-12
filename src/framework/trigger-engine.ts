@@ -14,6 +14,9 @@ class ButtonGestureHandler {
   private gestureState: GestureState = 'idle';
   private resolveTimer: ReturnType<typeof setTimeout> | null = null;
   private holdFired = false;
+  // Set when 'release' fires a short press; suppresses the trailing confirmation
+  // event ('on', 'toggle', etc.) so the same physical press doesn't fire twice.
+  private shortFired = false;
 
   constructor(
     private readonly entityId: string,
@@ -22,16 +25,13 @@ class ButtonGestureHandler {
   ) {}
 
   handle(actionState: string, correlationId: string): void {
-    // Reset hold tracking on button release so the next hold can fire again.
-    if (actionState === '' || actionState.toLowerCase() === 'release') {
-      this.holdFired = false;
-      return;
-    }
+    if (actionState === '') return;
 
     const parsed = parseButtonAction(actionState);
     if (!parsed) return;
 
     const { button, pressType } = parsed;
+    const isRelease = actionState.toLowerCase() === 'release';
 
     if (pressType === 'hold') {
       // Cancel any pending double-press window and fire hold exactly once per physical hold.
@@ -48,6 +48,19 @@ class ButtonGestureHandler {
     }
 
     // pressType === 'short'
+    if (isRelease && this.holdFired) {
+      // Physical release after a hold — reset hold state, don't fire short press.
+      this.holdFired = false;
+      return;
+    }
+    if (!isRelease && this.shortFired) {
+      // Confirmation event ('on', 'toggle', etc.) after 'release' already fired — suppress.
+      this.shortFired = false;
+      return;
+    }
+
+    if (isRelease) this.shortFired = true;
+
     if (this.gestureState === 'idle') {
       if (!this.supportsDoublePress) {
         this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'single_press', button, correlation_id: correlationId });
@@ -81,7 +94,7 @@ export function parseButtonAction(
   const action = prefixed ? prefixed[2] : s;
 
   if (/long|hold/.test(action)) return { button, pressType: 'hold' };
-  if (/short|click|single/.test(action) || action === 'on' || action === 'toggle') {
+  if (/short|click|single/.test(action) || action === 'on' || action === 'toggle' || action === 'release') {
     return { button, pressType: 'short' };
   }
   return null;
