@@ -118,6 +118,40 @@ describe('runPipeline — happy path', () => {
   });
 });
 
+// ---------- Disabled automation ----------
+
+describe('runPipeline — disabled automation', () => {
+  it('publishes abort with reason disabled and skips context and reduce', async () => {
+    const deps = makeDeps();
+    const ha = makeHAClient();
+    const auto = makeAutomation({ enabled: false });
+    await runPipeline(auto, onStartEvent, ha as never, deps as never);
+    expect(auto.context).not.toHaveBeenCalled();
+    expect(auto.reduce).not.toHaveBeenCalled();
+    const [event] = deps.observability.publishDecision.mock.calls[0] as [Record<string, unknown>];
+    expect(event.event_type).toBe('abort');
+    expect(event.reason).toBe('disabled');
+  });
+
+  it('runs normally when enabled is true', async () => {
+    const deps = makeDeps();
+    const ha = makeHAClient();
+    const auto = makeAutomation({ enabled: true });
+    await runPipeline(auto, onStartEvent, ha as never, deps as never);
+    expect(auto.context).toHaveBeenCalled();
+    expect(auto.reduce).toHaveBeenCalled();
+  });
+
+  it('runs normally when enabled is omitted', async () => {
+    const deps = makeDeps();
+    const ha = makeHAClient();
+    const auto = makeAutomation();
+    await runPipeline(auto, onStartEvent, ha as never, deps as never);
+    expect(auto.context).toHaveBeenCalled();
+    expect(auto.reduce).toHaveBeenCalled();
+  });
+});
+
 // ---------- Abort from context ----------
 
 describe('runPipeline — abort from context', () => {

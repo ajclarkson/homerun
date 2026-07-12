@@ -134,6 +134,7 @@ export class TriggerEngine {
                 for (const g of gestures) matchingGestures.add(g);
               }
             }
+            console.log(`[trigger-engine] lazy handler lookup: entity=${event.entity_id} state=${event.new_state.state} regexTriggers=${this.regexButtonTriggers.length} matchingGestures=${matchingGestures.size}`);
             if (matchingGestures.size > 0) {
               handler = new ButtonGestureHandler(event.entity_id, (e) => this.dispatch(e), matchingGestures.has('double_press'));
               this.buttonHandlers.set(event.entity_id, handler);

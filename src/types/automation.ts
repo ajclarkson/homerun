@@ -29,6 +29,7 @@ export interface Automation<C> {
   id: string;
   location: string;
   subsystem: string;
+  enabled?: boolean;
   triggers: Trigger[];
   context: (state: HAState, ha: HAContext, event: TriggerEvent) => C | Abort;
   reduce: (ctx: C) => Decision;
