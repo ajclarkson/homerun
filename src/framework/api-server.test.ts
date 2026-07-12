@@ -83,6 +83,7 @@ describe('ApiServer', () => {
         id: 'parlour:lighting',
         location: 'parlour',
         subsystem: 'lighting',
+        enabled: true,
         triggers: [
           { type: 'on_start' },
           { type: 'schedule', cron: '0 * * * *' },

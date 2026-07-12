@@ -66,6 +66,7 @@ export class ApiServer {
       id: a.id,
       location: a.location,
       subsystem: a.subsystem,
+      enabled: a.enabled ?? true,
       triggers: a.triggers.map(serializeTrigger),
     }));
     json(res, 200, automations);

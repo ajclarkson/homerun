@@ -30,6 +30,12 @@ export async function runPipeline(
     ...(deps.dryRun ? { dry_run: true } : {}),
   };
 
+  // Step 1: Enabled check
+  if (automation.enabled === false) {
+    deps.observability.publishDecision({ ...base, event_type: 'abort', reason: 'disabled' });
+    return;
+  }
+
   // Step 2: Context
   let ctx: unknown;
   try {
