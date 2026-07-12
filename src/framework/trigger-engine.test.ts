@@ -96,6 +96,10 @@ describe('parseButtonAction', () => {
     expect(parseButtonAction('unavailable')).toBeNull();
     expect(parseButtonAction('')).toBeNull();
     expect(parseButtonAction('off')).toBeNull();
+    // 'press' is raw button-down, not a confirmed action — confirmed action is 'on'/'off'/'toggle'
+    expect(parseButtonAction('press')).toBeNull();
+    expect(parseButtonAction('release')).toBeNull();
+    expect(parseButtonAction('brightness_step_down')).toBeNull();
   });
 });
 
@@ -322,6 +326,48 @@ describe('TriggerEngine', () => {
     it('resolves hold immediately without waiting for 400ms window', async () => {
       const { onMatch, emitStateChanged } = await setupButtonEngine();
 
+      press(emitStateChanged, 'sensor.button', 'hold');
+
+      expect(onMatch).toHaveBeenCalledOnce();
+      expect(onMatch).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ gesture: 'hold' }));
+    });
+
+    it('fires hold only once when hold state repeats while button is held', async () => {
+      const { onMatch, emitStateChanged } = await setupButtonEngine();
+
+      press(emitStateChanged, 'sensor.button', 'hold');
+      press(emitStateChanged, 'sensor.button', 'hold');
+      press(emitStateChanged, 'sensor.button', 'hold');
+
+      expect(onMatch).toHaveBeenCalledOnce();
+      expect(onMatch).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ gesture: 'hold' }));
+    });
+
+    it('fires hold again after release resets the dedup', async () => {
+      const { onMatch, emitStateChanged } = await setupButtonEngine();
+
+      press(emitStateChanged, 'sensor.button', 'hold');
+      emitStateChanged({ entity_id: 'sensor.button', old_state: undefined, new_state: makeEntityState('', 'sensor.button'), correlation_id: 'reset' });
+      press(emitStateChanged, 'sensor.button', 'hold');
+
+      expect(onMatch).toHaveBeenCalledTimes(2);
+      expect(onMatch.mock.calls.every(([, e]) => (e as { gesture: string }).gesture === 'hold')).toBe(true);
+    });
+
+    it('does not fire single_press for raw "press" state — only confirmed actions like "on"', async () => {
+      const { onMatch, emitStateChanged } = await setupButtonEngine();
+
+      emitStateChanged({ entity_id: 'sensor.button', old_state: undefined, new_state: makeEntityState('press', 'sensor.button'), correlation_id: 'test-cid' });
+      vi.advanceTimersByTime(400);
+
+      expect(onMatch).not.toHaveBeenCalled();
+    });
+
+    it('does not fire single_press on hold sequence (press → brightness_step_down → hold)', async () => {
+      const { onMatch, emitStateChanged } = await setupButtonEngine();
+
+      emitStateChanged({ entity_id: 'sensor.button', old_state: undefined, new_state: makeEntityState('press', 'sensor.button'), correlation_id: 'cid-1' });
+      emitStateChanged({ entity_id: 'sensor.button', old_state: undefined, new_state: makeEntityState('brightness_step_down', 'sensor.button'), correlation_id: 'cid-2' });
       press(emitStateChanged, 'sensor.button', 'hold');
 
       expect(onMatch).toHaveBeenCalledOnce();
