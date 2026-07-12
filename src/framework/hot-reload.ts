@@ -68,12 +68,14 @@ export function _deleteFile(
   fileToIds.delete(filePath);
 }
 
+const EXCLUDED_DIRS = new Set(['types', 'lib']);
+
 const isAutomationFile = (f: string): boolean =>
   f.endsWith('.ts') &&
   !f.endsWith('.test.ts') &&
   !f.includes('node_modules') &&
   !f.includes('.d.ts') &&
-  !f.split(path.sep).includes('types');
+  !f.split(path.sep).some(seg => EXCLUDED_DIRS.has(seg));
 
 export async function rescanAutomations(
   automationsDir: string,
