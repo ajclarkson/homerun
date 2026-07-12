@@ -148,7 +148,7 @@ export class TriggerEngine {
                 for (const g of gestures) matchingGestures.add(g);
               }
             }
-if (matchingGestures.size > 0) {
+            if (matchingGestures.size > 0) {
               handler = new ButtonGestureHandler(event.entity_id, (e) => this.dispatch(e), matchingGestures.has('double_press'));
               this.buttonHandlers.set(event.entity_id, handler);
             }
