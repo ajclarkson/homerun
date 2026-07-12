@@ -84,6 +84,8 @@ describe('parseButtonAction', () => {
     ['2_click', { button: '2', pressType: 'short' }],
     ['on', { button: undefined, pressType: 'short' }],
     ['toggle', { button: undefined, pressType: 'short' }],
+    // 'release' is the low-latency single press trigger (~120ms vs ~420ms for 'on')
+    ['release', { button: undefined, pressType: 'short' }],
     ['hold', { button: undefined, pressType: 'hold' }],
     ['long_press', { button: undefined, pressType: 'hold' }],
     ['button-long-press', { button: undefined, pressType: 'hold' }],
@@ -96,6 +98,9 @@ describe('parseButtonAction', () => {
     expect(parseButtonAction('unavailable')).toBeNull();
     expect(parseButtonAction('')).toBeNull();
     expect(parseButtonAction('off')).toBeNull();
+    // 'press' is raw button-down; the confirmed actions are 'release', 'on', 'toggle', etc.
+    expect(parseButtonAction('press')).toBeNull();
+    expect(parseButtonAction('brightness_step_down')).toBeNull();
   });
 });
 
@@ -323,6 +328,78 @@ describe('TriggerEngine', () => {
       const { onMatch, emitStateChanged } = await setupButtonEngine();
 
       press(emitStateChanged, 'sensor.button', 'hold');
+
+      expect(onMatch).toHaveBeenCalledOnce();
+      expect(onMatch).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ gesture: 'hold' }));
+    });
+
+    it('fires hold only once when hold state repeats while button is held', async () => {
+      const { onMatch, emitStateChanged } = await setupButtonEngine();
+      const blank = () => emitStateChanged({ entity_id: 'sensor.button', old_state: undefined, new_state: makeEntityState('', 'sensor.button'), correlation_id: 'blank' });
+
+      // Z2M emits hold → '' → hold → '' repeatedly while held
+      press(emitStateChanged, 'sensor.button', 'hold');
+      blank();
+      press(emitStateChanged, 'sensor.button', 'hold');
+      blank();
+      press(emitStateChanged, 'sensor.button', 'hold');
+
+      expect(onMatch).toHaveBeenCalledOnce();
+      expect(onMatch).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ gesture: 'hold' }));
+    });
+
+    it('fires hold again after release resets the dedup', async () => {
+      const { onMatch, emitStateChanged } = await setupButtonEngine();
+
+      press(emitStateChanged, 'sensor.button', 'hold');
+      press(emitStateChanged, 'sensor.button', 'release'); // button released after hold
+      press(emitStateChanged, 'sensor.button', 'hold');   // second hold
+
+      expect(onMatch).toHaveBeenCalledTimes(2);
+      expect(onMatch.mock.calls.every(([, e]) => (e as { gesture: string }).gesture === 'hold')).toBe(true);
+    });
+
+    it('does not fire single_press for raw "press" state — only release/on/toggle', async () => {
+      const { onMatch, emitStateChanged } = await setupButtonEngine();
+
+      emitStateChanged({ entity_id: 'sensor.button', old_state: undefined, new_state: makeEntityState('press', 'sensor.button'), correlation_id: 'test-cid' });
+      vi.advanceTimersByTime(400);
+
+      expect(onMatch).not.toHaveBeenCalled();
+    });
+
+    it('fires on release (~120ms), not on the trailing confirmation "on" event', async () => {
+      // Use a no-double-press setup so single_press fires immediately on release.
+      const { client, resolveReady, emitStateChanged } = makeMockHAClient();
+      const onMatch = vi.fn();
+      const automation = makeAutomation('a', [
+        { type: 'button', entity: 'sensor.button', gesture: 'single_press' },
+        { type: 'button', entity: 'sensor.button', gesture: 'hold' },
+      ]);
+      const engine = new TriggerEngine(makeRegistry(automation), client, onMatch);
+      engine.start();
+      resolveReady();
+      await vi.runAllTimersAsync();
+
+      // Simulate full Z2M single-press sequence: press → '' → release → '' → on → ''
+      emitStateChanged({ entity_id: 'sensor.button', old_state: undefined, new_state: makeEntityState('press', 'sensor.button'), correlation_id: 'cid-1' });
+      emitStateChanged({ entity_id: 'sensor.button', old_state: undefined, new_state: makeEntityState('', 'sensor.button'), correlation_id: 'cid-2' });
+      press(emitStateChanged, 'sensor.button', 'release');
+      emitStateChanged({ entity_id: 'sensor.button', old_state: undefined, new_state: makeEntityState('', 'sensor.button'), correlation_id: 'cid-3' });
+      press(emitStateChanged, 'sensor.button', 'on');
+
+      // single_press fires once (on release), 'on' is suppressed
+      expect(onMatch).toHaveBeenCalledOnce();
+      expect(onMatch).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ gesture: 'single_press' }));
+    });
+
+    it('does not fire single_press on hold sequence (press → brightness_step_down → hold → release)', async () => {
+      const { onMatch, emitStateChanged } = await setupButtonEngine();
+
+      emitStateChanged({ entity_id: 'sensor.button', old_state: undefined, new_state: makeEntityState('press', 'sensor.button'), correlation_id: 'cid-1' });
+      emitStateChanged({ entity_id: 'sensor.button', old_state: undefined, new_state: makeEntityState('brightness_step_down', 'sensor.button'), correlation_id: 'cid-2' });
+      press(emitStateChanged, 'sensor.button', 'hold');
+      press(emitStateChanged, 'sensor.button', 'release'); // release after hold — no short press
 
       expect(onMatch).toHaveBeenCalledOnce();
       expect(onMatch).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ gesture: 'hold' }));

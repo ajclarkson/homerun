@@ -13,6 +13,10 @@ type GestureState = 'idle' | 'resolving';
 class ButtonGestureHandler {
   private gestureState: GestureState = 'idle';
   private resolveTimer: ReturnType<typeof setTimeout> | null = null;
+  private holdFired = false;
+  // Set when 'release' fires a short press; suppresses the trailing confirmation
+  // event ('on', 'toggle', etc.) so the same physical press doesn't fire twice.
+  private shortFired = false;
 
   constructor(
     private readonly entityId: string,
@@ -21,36 +25,59 @@ class ButtonGestureHandler {
   ) {}
 
   handle(actionState: string, correlationId: string): void {
+    if (actionState === '') return;
+
     const parsed = parseButtonAction(actionState);
     if (!parsed) return;
 
     const { button, pressType } = parsed;
+    const isRelease = actionState.toLowerCase() === 'release';
 
-    if (this.gestureState === 'idle') {
-      if (pressType === 'short') {
-        if (!this.supportsDoublePress) {
-          this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'single_press', button, correlation_id: correlationId });
-        } else {
-          this.gestureState = 'resolving';
-          this.resolveTimer = setTimeout(() => {
-            this.resolveTimer = null;
-            this.gestureState = 'idle';
-            this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'single_press', button, correlation_id: correlationId });
-          }, DOUBLE_PRESS_WINDOW_MS);
-        }
-      } else {
+    if (pressType === 'hold') {
+      // Cancel any pending double-press window and fire hold exactly once per physical hold.
+      if (this.resolveTimer) {
+        clearTimeout(this.resolveTimer);
+        this.resolveTimer = null;
+        this.gestureState = 'idle';
+      }
+      if (!this.holdFired) {
+        this.holdFired = true;
         this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'hold', button, correlation_id: correlationId });
       }
+      return;
+    }
+
+    // pressType === 'short'
+    if (isRelease && this.holdFired) {
+      // Physical release after a hold — reset hold state, don't fire short press.
+      this.holdFired = false;
+      return;
+    }
+    if (!isRelease && this.shortFired) {
+      // Confirmation event ('on', 'toggle', etc.) after 'release' already fired — suppress.
+      this.shortFired = false;
+      return;
+    }
+
+    if (isRelease) this.shortFired = true;
+
+    if (this.gestureState === 'idle') {
+      if (!this.supportsDoublePress) {
+        this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'single_press', button, correlation_id: correlationId });
+      } else {
+        this.gestureState = 'resolving';
+        this.resolveTimer = setTimeout(() => {
+          this.resolveTimer = null;
+          this.gestureState = 'idle';
+          this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'single_press', button, correlation_id: correlationId });
+        }, DOUBLE_PRESS_WINDOW_MS);
+      }
     } else {
-      // resolving — waiting for double press
+      // resolving — second short press = double press
       clearTimeout(this.resolveTimer!);
       this.resolveTimer = null;
       this.gestureState = 'idle';
-      if (pressType === 'short') {
-        this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'double_press', button, correlation_id: correlationId });
-      } else {
-        this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'hold', button, correlation_id: correlationId });
-      }
+      this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'double_press', button, correlation_id: correlationId });
     }
   }
 }
@@ -67,7 +94,7 @@ export function parseButtonAction(
   const action = prefixed ? prefixed[2] : s;
 
   if (/long|hold/.test(action)) return { button, pressType: 'hold' };
-  if (/short|click|single/.test(action) || action === 'press' || action === 'on' || action === 'toggle') {
+  if (/short|click|single/.test(action) || action === 'on' || action === 'toggle' || action === 'release') {
     return { button, pressType: 'short' };
   }
   return null;
@@ -134,7 +161,6 @@ export class TriggerEngine {
                 for (const g of gestures) matchingGestures.add(g);
               }
             }
-            console.log(`[trigger-engine] lazy handler lookup: entity=${event.entity_id} state=${event.new_state.state} regexTriggers=${this.regexButtonTriggers.length} matchingGestures=${matchingGestures.size}`);
             if (matchingGestures.size > 0) {
               handler = new ButtonGestureHandler(event.entity_id, (e) => this.dispatch(e), matchingGestures.has('double_press'));
               this.buttonHandlers.set(event.entity_id, handler);
