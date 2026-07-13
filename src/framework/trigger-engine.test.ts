@@ -301,6 +301,26 @@ describe('TriggerEngine', () => {
 
       expect(onMatch).not.toHaveBeenCalled();
     });
+
+    it('does not fire when `to` matches but state value has not changed (attribute-only update)', async () => {
+      const { client, resolveReady, emitStateChanged } = makeMockHAClient();
+      const onMatch = vi.fn();
+      const automation = makeAutomation('a', [{ type: 'state_changed', entity: 'light.kitchen', to: 'on' }]);
+
+      const engine = new TriggerEngine(makeRegistry(automation), client, onMatch);
+      engine.start();
+      resolveReady();
+      await vi.runAllTimersAsync();
+
+      emitStateChanged({
+        entity_id: 'light.kitchen',
+        old_state: makeEntityState('on', 'light.kitchen'),
+        new_state: makeEntityState('on', 'light.kitchen'),
+        correlation_id: 'test-cid',
+      });
+
+      expect(onMatch).not.toHaveBeenCalled();
+    });
   });
 
   // ---------- on_start ----------

@@ -262,7 +262,8 @@ function matchesTrigger(trigger: Trigger, event: TriggerEvent): boolean {
       if (!entityMatch) return false;
       if (trigger.to !== undefined) {
         const allowed = Array.isArray(trigger.to) ? trigger.to : [trigger.to];
-        return allowed.includes(event.new_state.state);
+        if (!allowed.includes(event.new_state.state)) return false;
+        if (event.old_state?.state === event.new_state.state) return false;
       }
       return true;
     }
