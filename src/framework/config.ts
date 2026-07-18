@@ -31,7 +31,8 @@ const ConfigSchema = z.object({
   }),
   server: z.object({
     port: z.coerce.number().int().min(1).max(65535).default(7070),
-  }).default({ port: 7070 }),
+    shutdown_timeout_ms: z.coerce.number().int().min(0).default(10_000),
+  }).default({ port: 7070, shutdown_timeout_ms: 10_000 }),
   options: z.object({
     dry_run: z.boolean().default(false),
   }).default({ dry_run: false }),

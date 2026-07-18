@@ -58,11 +58,23 @@ await rescanAutomations(automationsDir, registry);
 console.log(`[homerun] loaded ${registry.getAll().length} automation(s)`);
 
 // 4. Wire up the engine and scheduler.
-engine = new TriggerEngine(registry, haClient, (automation, event) => {
-  runPipeline(automation, event, haClient, { eventPublisher, actionRuntime, dryRun }).catch((err: unknown) => {
-    console.error('[homerun] pipeline error:', err);
-  });
-}, mqtt);
+//    Track in-flight pipelines so graceful shutdown can drain before exit.
+let shuttingDown = false;
+let inFlight = 0;
+let drainResolve: (() => void) | null = null;
+
+function dispatchPipeline(automation: Parameters<typeof runPipeline>[0], event: Parameters<typeof runPipeline>[1]): void {
+  if (shuttingDown) return;
+  inFlight++;
+  runPipeline(automation, event, haClient, { eventPublisher, actionRuntime, dryRun })
+    .catch((err: unknown) => { console.error('[homerun] pipeline error:', err); })
+    .finally(() => {
+      inFlight--;
+      if (inFlight === 0 && drainResolve) { drainResolve(); drainResolve = null; }
+    });
+}
+
+engine = new TriggerEngine(registry, haClient, dispatchPipeline, mqtt);
 const scheduler = new Scheduler(registry.getAll(), (e) => engine.dispatch(e), haClient.ready);
 
 engine.start();
@@ -89,11 +101,7 @@ process.on('SIGUSR1', () => {
 let haReady = false;
 const apiServer = new ApiServer({
   registry,
-  onTrigger: (automation, event) => {
-    runPipeline(automation, event, haClient, { eventPublisher, actionRuntime, dryRun }).catch((err: unknown) => {
-      console.error('[homerun] pipeline error (http trigger):', err);
-    });
-  },
+  onTrigger: dispatchPipeline,
   onReload: reload,
   isReady: () => haReady,
   entityCount: () => haClient.entityCount,
@@ -113,3 +121,42 @@ await haClient.ready;
 haReady = true;
 console.log(`[homerun] ready — ${haClient.entityCount} entities cached`);
 eventPublisher.publishLifecycle('server_started', registry.getAll().length, dryRun);
+
+// 8. Graceful SIGTERM shutdown.
+process.on('SIGTERM', () => {
+  console.log('[homerun] SIGTERM received — starting graceful shutdown');
+  const { shutdown_timeout_ms: timeoutMs } = config.server;
+  shuttingDown = true;
+
+  const automationCount = registry.getAll().length;
+  eventPublisher.publishLifecycle('server_stopping', automationCount, dryRun);
+
+  const drain = (): Promise<void> => {
+    if (inFlight === 0) return Promise.resolve();
+    console.log(`[homerun] draining ${inFlight} in-flight pipeline(s)...`);
+    return new Promise<void>((resolve) => {
+      drainResolve = resolve;
+      setTimeout(() => {
+        if (drainResolve) {
+          console.warn(`[homerun] shutdown: drain timed out with ${inFlight} pipeline(s) still running`);
+          drainResolve = null;
+          resolve();
+        }
+      }, timeoutMs);
+    });
+  };
+
+  Promise.resolve()
+    .then(() => apiServer.stop())
+    .then(() => { scheduler.stop(); timerManager.cancelAll(); })
+    .then(drain)
+    .then(() => { haClient.disconnect(); return mqtt.endAsync(); })
+    .then(() => {
+      console.log('[homerun] shutdown complete');
+      process.exit(0);
+    })
+    .catch((err: unknown) => {
+      console.error('[homerun] shutdown error:', err);
+      process.exit(1);
+    });
+});
