@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { MqttClient } from 'mqtt';
 import { ApiServer } from './api-server.js';
 import { AutomationRegistry } from './registry.js';
-import { Observability } from './observability.js';
+import { EventPublisher } from './event-publisher.js';
 import type { Automation } from '../types/automation.js';
 
 // ---------- Helpers ----------
@@ -35,7 +35,7 @@ async function post(port: number, path: string): Promise<Response> {
 
 describe('ApiServer', () => {
   let registry: AutomationRegistry;
-  let obs: Observability;
+  let obs: EventPublisher;
   let onTrigger: ReturnType<typeof vi.fn>;
   let onReload: ReturnType<typeof vi.fn>;
   let isReady: ReturnType<typeof vi.fn>;
@@ -45,13 +45,13 @@ describe('ApiServer', () => {
 
   beforeEach(async () => {
     registry = new AutomationRegistry();
-    obs = new Observability(makeMqtt() as unknown as MqttClient);
+    obs = new EventPublisher(makeMqtt() as unknown as MqttClient);
     onTrigger = vi.fn();
     onReload = vi.fn().mockResolvedValue(undefined);
     isReady = vi.fn().mockReturnValue(true);
     entityCount = vi.fn().mockReturnValue(42);
 
-    server = new ApiServer({ registry, onTrigger, onReload, isReady, entityCount, observability: obs });
+    server = new ApiServer({ registry, onTrigger, onReload, isReady, entityCount, eventPublisher: obs });
     await server.start(0);
     port = server.port!;
   });
@@ -200,7 +200,7 @@ describe('ApiServer', () => {
     });
 
     it('includes dry_run: true in the response when in dry-run mode', async () => {
-      const dryServer = new ApiServer({ registry, onTrigger, onReload, isReady, entityCount, observability: obs, dryRun: true });
+      const dryServer = new ApiServer({ registry, onTrigger, onReload, isReady, entityCount, eventPublisher: obs, dryRun: true });
       await dryServer.start(0);
       try {
         const res = await get(dryServer.port!, '/health/ready');
@@ -222,7 +222,7 @@ describe('ApiServer', () => {
       controller.abort();
     });
 
-    it('streams events published via observability', async () => {
+    it('streams events published via event publisher', async () => {
       const controller = new AbortController();
       const res = await fetch(`http://127.0.0.1:${port}/events`, { signal: controller.signal });
       const reader = res.body!.getReader();

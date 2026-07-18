@@ -2,7 +2,7 @@ import type { MqttClient } from 'mqtt';
 import type { Action } from '../types/actions.js';
 import type { HAClient } from './ha-client.js';
 import type { TimerManager } from './timer-manager.js';
-import type { Observability, ObsEvent } from './observability.js';
+import type { EventPublisher, ObsEvent } from './event-publisher.js';
 
 export interface ExecutionContext {
   correlationId: string;
@@ -15,7 +15,7 @@ interface Deps {
   haClient: HAClient;
   mqttClient: MqttClient;
   timerManager: TimerManager;
-  observability: Observability;
+  eventPublisher: EventPublisher;
   dryRun: boolean;
 }
 
@@ -29,18 +29,18 @@ export class ActionRuntime {
   }
 
   private async runAction(action: Action, ctx: ExecutionContext): Promise<void> {
-    this.deps.observability.publishActionEvent(this.makeEvent(ctx, 'action_started', action));
+    this.deps.eventPublisher.publishActionEvent(this.makeEvent(ctx, 'action_started', action));
 
     try {
       if (!this.deps.dryRun) {
         await this.dispatch(action);
       }
-      this.deps.observability.publishActionEvent(
+      this.deps.eventPublisher.publishActionEvent(
         this.makeEvent(ctx, 'action_result', action, { reason: 'ok' }),
       );
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      this.deps.observability.publishActionEvent(
+      this.deps.eventPublisher.publishActionEvent(
         this.makeEvent(ctx, 'action_result', action, { reason }),
       );
     }
