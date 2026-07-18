@@ -4,11 +4,13 @@ import { isAbort } from '../types/automation.js';
 import type { HAClient } from './ha-client.js';
 import type { EventPublisher, ObsEvent } from './event-publisher.js';
 import type { ActionRuntime } from './action-runtime.js';
+import type { MetricsBackend } from './metrics.js';
 
 interface Deps {
   eventPublisher: EventPublisher;
   actionRuntime: ActionRuntime;
   dryRun?: boolean;
+  metrics?: MetricsBackend;
 }
 
 export async function runPipeline(
@@ -17,6 +19,11 @@ export async function runPipeline(
   haClient: HAClient,
   deps: Deps,
 ): Promise<void> {
+  deps.metrics?.incrementCounter('homerun_pipeline_runs_total', {
+    location: automation.location,
+    trigger_type: event.type,
+  });
+
   const correlationId = event.correlation_id;
   const timestamp = new Date().toISOString();
 

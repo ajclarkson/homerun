@@ -3,6 +3,7 @@ import type { Action } from '../types/actions.js';
 import type { HAClient } from './ha-client.js';
 import type { TimerManager } from './timer-manager.js';
 import type { EventPublisher, ObsEvent } from './event-publisher.js';
+import type { MetricsBackend } from './metrics.js';
 
 export interface ExecutionContext {
   correlationId: string;
@@ -17,6 +18,7 @@ interface Deps {
   timerManager: TimerManager;
   eventPublisher: EventPublisher;
   dryRun: boolean;
+  metrics?: MetricsBackend;
 }
 
 export class ActionRuntime {
@@ -29,16 +31,25 @@ export class ActionRuntime {
   }
 
   private async runAction(action: Action, ctx: ExecutionContext): Promise<void> {
+    const labels = { location: ctx.location, action_type: action.type };
     this.deps.eventPublisher.publishActionEvent(this.makeEvent(ctx, 'action_started', action));
+    this.deps.metrics?.incrementCounter('homerun_actions_dispatched_total', labels);
 
+    const start = performance.now();
     try {
       if (!this.deps.dryRun) {
         await this.dispatch(action);
       }
+      const duration = (performance.now() - start) / 1000;
+      this.deps.metrics?.observeHistogram('homerun_action_duration_seconds', duration, labels);
+      this.deps.metrics?.incrementCounter('homerun_actions_succeeded_total', labels);
       this.deps.eventPublisher.publishActionEvent(
         this.makeEvent(ctx, 'action_result', action, { reason: 'ok' }),
       );
     } catch (err) {
+      const duration = (performance.now() - start) / 1000;
+      this.deps.metrics?.observeHistogram('homerun_action_duration_seconds', duration, labels);
+      this.deps.metrics?.incrementCounter('homerun_actions_failed_total', labels);
       const reason = err instanceof Error ? err.message : String(err);
       this.deps.eventPublisher.publishActionEvent(
         this.makeEvent(ctx, 'action_result', action, { reason }),

@@ -273,6 +273,40 @@ describe('ApiServer', () => {
     });
   });
 
+  // ---------- GET /metrics ----------
+
+  describe('GET /metrics', () => {
+    it('returns 404 when no metrics provider is configured', async () => {
+      const res = await get(port, '/metrics');
+      expect(res.status).toBe(404);
+    });
+
+    it('returns 200 with prometheus text when a metrics provider is configured', async () => {
+      const metricsOutput = '# HELP homerun_pipeline_runs_total Total pipeline runs\nhomerun_pipeline_runs_total 0\n';
+      const metricsServer = new ApiServer({
+        registry,
+        onTrigger: vi.fn(),
+        onReload: vi.fn().mockResolvedValue(undefined),
+        isReady: vi.fn().mockReturnValue(true),
+        entityCount: vi.fn().mockReturnValue(0),
+        eventPublisher: obs,
+        metrics: {
+          getMetrics: vi.fn().mockResolvedValue(metricsOutput),
+          contentType: 'text/plain; version=0.0.4',
+        },
+      });
+      await metricsServer.start(0);
+      try {
+        const res = await get(metricsServer.port!, '/metrics');
+        expect(res.status).toBe(200);
+        expect(res.headers.get('content-type')).toContain('text/plain');
+        expect(await res.text()).toBe(metricsOutput);
+      } finally {
+        await metricsServer.stop();
+      }
+    });
+  });
+
   // ---------- Unknown routes ----------
 
   describe('unknown routes', () => {

@@ -10,6 +10,7 @@ function makeDeps() {
   return {
     eventPublisher: { publishDecision: vi.fn(), publishActionEvent: vi.fn() },
     actionRuntime: { execute: vi.fn().mockResolvedValue(undefined) },
+    metrics: { incrementCounter: vi.fn(), observeHistogram: vi.fn() },
   };
 }
 
@@ -248,5 +249,38 @@ describe('runPipeline — dry-run mode', () => {
     await runPipeline(auto, onStartEvent, ha as never, deps as never);
     const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
     expect(event.dry_run).toBe(true);
+  });
+});
+
+// ---------- Metrics ----------
+
+describe('runPipeline — metrics', () => {
+  it('increments homerun_pipeline_runs_total with location and trigger_type', async () => {
+    const deps = makeDeps();
+    const ha = makeHAClient();
+    const auto = makeAutomation();
+    await runPipeline(auto, onStartEvent, ha as never, deps as never);
+    expect(deps.metrics.incrementCounter).toHaveBeenCalledWith(
+      'homerun_pipeline_runs_total',
+      { location: 'parlour', trigger_type: 'on_start' },
+    );
+  });
+
+  it('increments pipeline counter even when context aborts', async () => {
+    const deps = makeDeps();
+    const ha = makeHAClient();
+    const auto = makeAutomation({ context: vi.fn().mockReturnValue(abort('guard_failed')) });
+    await runPipeline(auto, onStartEvent, ha as never, deps as never);
+    expect(deps.metrics.incrementCounter).toHaveBeenCalledWith(
+      'homerun_pipeline_runs_total',
+      expect.objectContaining({ location: 'parlour' }),
+    );
+  });
+
+  it('does not throw when metrics dep is absent', async () => {
+    const deps = { eventPublisher: { publishDecision: vi.fn(), publishActionEvent: vi.fn() }, actionRuntime: { execute: vi.fn().mockResolvedValue(undefined) } };
+    const ha = makeHAClient();
+    const auto = makeAutomation();
+    await expect(runPipeline(auto, onStartEvent, ha as never, deps as never)).resolves.toBeUndefined();
   });
 });

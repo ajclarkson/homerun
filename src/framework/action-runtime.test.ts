@@ -10,7 +10,8 @@ function makeDeps(dryRun = false) {
   const mqttClient = { publishAsync: vi.fn().mockResolvedValue(undefined) };
   const timerManager = { start: vi.fn(), cancel: vi.fn() };
   const eventPublisher = { publishActionEvent: vi.fn() };
-  return { haClient, mqttClient, timerManager, eventPublisher, dryRun };
+  const metrics = { incrementCounter: vi.fn(), observeHistogram: vi.fn() };
+  return { haClient, mqttClient, timerManager, eventPublisher, dryRun, metrics };
 }
 
 function makeCtx(overrides: Partial<ExecutionContext> = {}): ExecutionContext {
@@ -155,6 +156,62 @@ describe('ActionRuntime — dry-run mode', () => {
     const events = deps.eventPublisher.publishActionEvent.mock.calls.map((c: unknown[]) => c[0] as { event_type: string; dry_run: boolean });
     expect(events).toHaveLength(2);
     expect(events.every((e) => e.dry_run === true)).toBe(true);
+  });
+});
+
+// ---------- Metrics ----------
+
+describe('ActionRuntime — metrics', () => {
+  it('increments dispatched counter with location and action_type on success', async () => {
+    const deps = makeDeps();
+    const rt = new ActionRuntime(deps as never);
+    await rt.execute([{ type: 'ha.call_service', domain: 'light', service: 'turn_on' }], makeCtx());
+    expect(deps.metrics.incrementCounter).toHaveBeenCalledWith(
+      'homerun_actions_dispatched_total',
+      { location: 'parlour', action_type: 'ha.call_service' },
+    );
+    expect(deps.metrics.incrementCounter).toHaveBeenCalledWith(
+      'homerun_actions_succeeded_total',
+      { location: 'parlour', action_type: 'ha.call_service' },
+    );
+  });
+
+  it('increments failed counter on HA error', async () => {
+    const deps = makeDeps();
+    deps.haClient.callService.mockRejectedValueOnce(new Error('timeout'));
+    const rt = new ActionRuntime(deps as never);
+    await rt.execute([{ type: 'ha.call_service', domain: 'light', service: 'turn_on' }], makeCtx());
+    expect(deps.metrics.incrementCounter).toHaveBeenCalledWith(
+      'homerun_actions_failed_total',
+      { location: 'parlour', action_type: 'ha.call_service' },
+    );
+    expect(deps.metrics.incrementCounter).not.toHaveBeenCalledWith(
+      'homerun_actions_succeeded_total',
+      expect.anything(),
+    );
+  });
+
+  it('observes action duration histogram on success', async () => {
+    const deps = makeDeps();
+    const rt = new ActionRuntime(deps as never);
+    await rt.execute([{ type: 'ha.call_service', domain: 'light', service: 'turn_on' }], makeCtx());
+    expect(deps.metrics.observeHistogram).toHaveBeenCalledWith(
+      'homerun_action_duration_seconds',
+      expect.any(Number),
+      { location: 'parlour', action_type: 'ha.call_service' },
+    );
+  });
+
+  it('observes action duration histogram on failure', async () => {
+    const deps = makeDeps();
+    deps.haClient.callService.mockRejectedValueOnce(new Error('oops'));
+    const rt = new ActionRuntime(deps as never);
+    await rt.execute([{ type: 'ha.call_service', domain: 'light', service: 'turn_off' }], makeCtx());
+    expect(deps.metrics.observeHistogram).toHaveBeenCalledWith(
+      'homerun_action_duration_seconds',
+      expect.any(Number),
+      { location: 'parlour', action_type: 'ha.call_service' },
+    );
   });
 });
 

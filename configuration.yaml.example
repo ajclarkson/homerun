@@ -11,6 +11,10 @@ automations:
 # Optional — defaults shown
 server:
   port: 7070
+  shutdown_timeout_ms: 10000
 
 options:
   dry_run: false
+
+metrics:
+  enabled: false   # set to true to expose Prometheus metrics at GET /metrics

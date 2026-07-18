@@ -11,6 +11,8 @@ import { Scheduler } from './framework/scheduler.js';
 import { rescanAutomations, startHotReload } from './framework/hot-reload.js';
 import { runPipeline } from './framework/pipeline.js';
 import { ApiServer } from './framework/api-server.js';
+import { PromMetricsBackend } from './framework/metrics-prom.js';
+import { NoopMetricsBackend } from './framework/metrics.js';
 
 process.on('uncaughtException', (err) => {
   console.error('[homerun] uncaughtException:', err);
@@ -22,6 +24,7 @@ process.on('unhandledRejection', (reason) => {
 // 0. Load and validate configuration before anything else.
 const config = await loadConfig();
 const { dry_run: dryRun } = config.options;
+const metricsBackend = config.metrics.enabled ? new PromMetricsBackend(true) : new NoopMetricsBackend();
 
 const lwtTopic = dryRun ? 'homerun/dev/status' : 'homerun/status';
 const lwtPayload = JSON.stringify({ status: 'offline', timestamp: new Date().toISOString() });
@@ -49,6 +52,7 @@ const actionRuntime = new ActionRuntime({
   timerManager,
   eventPublisher,
   dryRun,
+  metrics: metricsBackend,
 });
 
 // 3. Initial automation load — must complete before the engine and scheduler start.
@@ -66,7 +70,7 @@ let drainResolve: (() => void) | null = null;
 function dispatchPipeline(automation: Parameters<typeof runPipeline>[0], event: Parameters<typeof runPipeline>[1]): void {
   if (shuttingDown) return;
   inFlight++;
-  runPipeline(automation, event, haClient, { eventPublisher, actionRuntime, dryRun })
+  runPipeline(automation, event, haClient, { eventPublisher, actionRuntime, dryRun, metrics: metricsBackend })
     .catch((err: unknown) => { console.error('[homerun] pipeline error:', err); })
     .finally(() => {
       inFlight--;
@@ -74,7 +78,7 @@ function dispatchPipeline(automation: Parameters<typeof runPipeline>[0], event: 
     });
 }
 
-engine = new TriggerEngine(registry, haClient, dispatchPipeline, mqtt);
+engine = new TriggerEngine(registry, haClient, dispatchPipeline, mqtt, metricsBackend);
 const scheduler = new Scheduler(registry.getAll(), (e) => engine.dispatch(e), haClient.ready);
 
 engine.start();
@@ -107,6 +111,7 @@ const apiServer = new ApiServer({
   entityCount: () => haClient.entityCount,
   eventPublisher,
   dryRun,
+  metrics: config.metrics.enabled ? metricsBackend as PromMetricsBackend : undefined,
 });
 await apiServer.start(config.server.port);
 
