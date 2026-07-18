@@ -5,6 +5,11 @@ import type { EventPublisher, ObsEvent } from './event-publisher.js';
 import type { Automation } from '../types/automation.js';
 import type { Trigger, TriggerEvent } from '../types/triggers.js';
 
+export interface MetricsProvider {
+  getMetrics(): Promise<string>;
+  contentType: string;
+}
+
 export interface ApiServerDeps {
   registry: AutomationRegistry;
   onTrigger: (automation: Automation<unknown>, event: TriggerEvent) => void;
@@ -13,6 +18,7 @@ export interface ApiServerDeps {
   entityCount: () => number;
   eventPublisher: EventPublisher;
   dryRun?: boolean;
+  metrics?: MetricsProvider;
 }
 
 export class ApiServer {
@@ -54,6 +60,7 @@ export class ApiServer {
     if (method === 'GET' && url === '/health/live') return this.getHealthLive(res);
     if (method === 'GET' && url === '/health/ready') return this.getHealthReady(res);
     if (method === 'GET' && url === '/events') return this.getEvents(req, res);
+    if (method === 'GET' && url === '/metrics') return this.getMetrics(res);
 
     const triggerMatch = method === 'POST' && url.match(/^\/automations\/(.+)\/trigger$/);
     if (triggerMatch) return this.postTrigger(triggerMatch[1], res);
@@ -106,6 +113,22 @@ export class ApiServer {
       automations: this.deps.registry.getAll().length,
       ...(this.deps.dryRun && { dry_run: true }),
     });
+  }
+
+  private getMetrics(res: ServerResponse): void {
+    if (!this.deps.metrics) {
+      json(res, 404, { error: 'metrics not enabled' });
+      return;
+    }
+    this.deps.metrics.getMetrics()
+      .then((output) => {
+        res.writeHead(200, { 'Content-Type': this.deps.metrics!.contentType });
+        res.end(output);
+      })
+      .catch((err: unknown) => {
+        console.error('[ApiServer] metrics scrape failed:', err);
+        json(res, 500, { error: 'metrics scrape failed' });
+      });
   }
 
   private getEvents(req: IncomingMessage, res: ServerResponse): void {

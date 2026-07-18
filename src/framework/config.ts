@@ -36,6 +36,9 @@ const ConfigSchema = z.object({
   options: z.object({
     dry_run: z.boolean().default(false),
   }).default({ dry_run: false }),
+  metrics: z.object({
+    enabled: z.boolean().default(false),
+  }).default({ enabled: false }),
 });
 
 export type HomerunConfig = z.infer<typeof ConfigSchema>;

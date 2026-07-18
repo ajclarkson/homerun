@@ -3,6 +3,7 @@ import type { Automation } from '../types/automation.js';
 import type { Trigger, TriggerEvent } from '../types/triggers.js';
 import type { HAClient, StateChangedEvent } from './ha-client.js';
 import type { AutomationRegistry } from './registry.js';
+import type { MetricsBackend } from './metrics.js';
 
 const DOUBLE_PRESS_WINDOW_MS = 250;
 
@@ -112,6 +113,7 @@ export class TriggerEngine {
     private readonly haClient: HAClient,
     private readonly onMatch: (automation: Automation<unknown>, event: TriggerEvent) => void,
     private readonly mqttClient?: MqttClient,
+    private readonly metrics?: MetricsBackend,
   ) {
     this.rebuildButtonHandlers();
     registry.onChange(() => this.rebuildButtonHandlers());
@@ -153,6 +155,7 @@ export class TriggerEngine {
     this.haClient.ready
       .then(() => {
         this.haClient.on('state_changed', (event: StateChangedEvent) => {
+          this.metrics?.incrementCounter('homerun_ha_events_received_total', { event_type: 'state_changed' });
           let handler = this.buttonHandlers.get(event.entity_id);
           if (!handler) {
             const matchingGestures = new Set<string>();
@@ -196,6 +199,9 @@ export class TriggerEngine {
       this.mqttClient.subscribe('homerun/trigger/+');
 
       this.mqttClient.on('message', (topic: string, payload: Buffer) => {
+        if (!topic.startsWith('homerun/trigger/')) {
+          this.metrics?.incrementCounter('homerun_ha_events_received_total', { event_type: 'mqtt_in' });
+        }
         if (topic.startsWith('homerun/trigger/')) {
           const automationId = topic.slice('homerun/trigger/'.length);
           const automation = this.registry.getById(automationId);
