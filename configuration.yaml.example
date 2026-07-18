@@ -1,0 +1,16 @@
+homeassistant:
+  url: http://homeassistant.local:8123
+  token: !secret ha_token   # or paste token directly as a string
+
+mqtt:
+  url: mqtt://localhost:1883
+
+automations:
+  dir: ./automations
+
+# Optional — defaults shown
+server:
+  port: 7070
+
+options:
+  dry_run: false

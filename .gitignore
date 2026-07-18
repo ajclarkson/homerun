@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .env
+secrets.yaml
 *.js.map
 .tmuxinator.yml
 

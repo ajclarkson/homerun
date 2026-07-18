@@ -1,6 +1,6 @@
-import 'dotenv/config';
 import path from 'node:path';
 import { connect } from 'mqtt';
+import { loadConfig } from './framework/config.js';
 import { HAClient } from './framework/ha-client.js';
 import { AutomationRegistry } from './framework/registry.js';
 import { EventPublisher } from './framework/event-publisher.js';
@@ -19,12 +19,15 @@ process.on('unhandledRejection', (reason) => {
   console.error('[homerun] unhandledRejection:', reason);
 });
 
-const dryRun = process.env.DRY_RUN === 'true';
+// 0. Load and validate configuration before anything else.
+const config = await loadConfig();
+const { dry_run: dryRun } = config.options;
+
 const lwtTopic = dryRun ? 'homerun/dev/status' : 'homerun/status';
 const lwtPayload = JSON.stringify({ status: 'offline', timestamp: new Date().toISOString() });
 
 // 1. Connect MQTT before anything else (EventPublisher and ActionRuntime need it).
-const mqtt = connect(process.env.MQTT_URL!, {
+const mqtt = connect(config.mqtt.url, {
   will: { topic: lwtTopic, payload: lwtPayload, qos: 1, retain: true },
 });
 await new Promise<void>((resolve, reject) => {
@@ -49,7 +52,7 @@ const actionRuntime = new ActionRuntime({
 });
 
 // 3. Initial automation load — must complete before the engine and scheduler start.
-const automationsDir = path.resolve(process.env.AUTOMATIONS_DIR!);
+const automationsDir = path.resolve(config.automations.dir);
 
 await rescanAutomations(automationsDir, registry);
 console.log(`[homerun] loaded ${registry.getAll().length} automation(s)`);
@@ -65,7 +68,7 @@ const scheduler = new Scheduler(registry.getAll(), (e) => engine.dispatch(e), ha
 engine.start();
 scheduler.start();
 
-// 5. Start hot-reload watcher (dev) and SIGUSR1 rescan (git-sync sidecar in K8s).
+// 5. Start hot-reload watcher (dev) and SIGUSR1 rescan (git-sync sidecar in k8s).
 startHotReload(automationsDir, registry);
 
 async function reload(): Promise<void> {
@@ -97,7 +100,7 @@ const apiServer = new ApiServer({
   eventPublisher,
   dryRun,
 });
-await apiServer.start(Number(process.env.API_PORT ?? 7070));
+await apiServer.start(config.server.port);
 
 // 7. Connect to HA last — state_changed events start flowing once ready resolves.
 haClient.on('reconnected', () => {
@@ -105,7 +108,7 @@ haClient.on('reconnected', () => {
   eventPublisher.publishLifecycle('ha_reconnected', registry.getAll().length, dryRun);
 });
 
-await haClient.connect(process.env.HA_URL!, process.env.HA_TOKEN!);
+await haClient.connect(config.homeassistant.url, config.homeassistant.token);
 await haClient.ready;
 haReady = true;
 console.log(`[homerun] ready — ${haClient.entityCount} entities cached`);

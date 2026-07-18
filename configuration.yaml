@@ -1,0 +1,12 @@
+homeassistant:
+  url: https://home.local.clarksons.me
+  token: !secret ha_token
+
+mqtt:
+  url: mqtt://10.0.0.31:1883
+
+automations:
+  dir: ../homerun-automations
+
+options:
+  dry_run: true

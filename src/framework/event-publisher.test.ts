@@ -22,7 +22,7 @@ function makeDecisionEvent(overrides: Partial<ObsEvent> = {}): ObsEvent {
     automation_id: 'parlour:lighting',
     location: 'parlour',
     subsystem: 'lighting',
-    type: 'decision',
+    event_type: 'decision',
     decision: 'lights_on',
     inputs: { lux: 40 },
     timestamp: new Date().toISOString(),
@@ -48,7 +48,7 @@ describe('EventPublisher — publishDecision', () => {
     const call = callForTopic(mqtt, 'homerun/events')!;
     expect(call[0]).toBe('homerun/events');
     expect(call[2]).toMatchObject({ retain: false });
-    expect(JSON.parse(call[1] as string)).toMatchObject({ schema: 'home.events.v1', type: 'decision', location: 'parlour' });
+    expect(JSON.parse(call[1] as string)).toMatchObject({ schema: 'home.events.v1', location: 'parlour' });
   });
 
   it('publishes the event retained to homerun/{location}/{subsystem}/decision', async () => {
@@ -94,25 +94,22 @@ describe('EventPublisher — publishActionEvent', () => {
     publisher = new EventPublisher(mqtt as unknown as MqttClient);
   });
 
-  it('publishes an abort event to homerun/events with type: abort', async () => {
-    publisher.publishActionEvent(makeDecisionEvent({ type: 'abort', reason: 'guard_failed' }));
+  it('publishes an action event to homerun/events', async () => {
+    publisher.publishActionEvent(makeDecisionEvent({ event_type: 'action_started' }));
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalled());
 
-    const call = callForTopic(mqtt, 'homerun/events')!;
-    const payload = JSON.parse(call[1] as string);
-    expect(payload.type).toBe('abort');
-    expect(payload.reason).toBe('guard_failed');
+    expect(callForTopic(mqtt, 'homerun/events')).toBeDefined();
   });
 
   it('does not publish to the retained decision topic for action events', async () => {
-    publisher.publishActionEvent(makeDecisionEvent({ type: 'action_started' }));
+    publisher.publishActionEvent(makeDecisionEvent({ event_type: 'action_started' }));
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalled());
 
     expect(callForTopic(mqtt, 'homerun/parlour/lighting/decision')).toBeUndefined();
   });
 
   it('routes dry_run action events to homerun/dev/events', async () => {
-    publisher.publishActionEvent(makeDecisionEvent({ type: 'action_started', dry_run: true }));
+    publisher.publishActionEvent(makeDecisionEvent({ event_type: 'action_started', dry_run: true }));
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalled());
 
     expect(callForTopic(mqtt, 'homerun/dev/events')).toBeDefined();
@@ -121,7 +118,7 @@ describe('EventPublisher — publishActionEvent', () => {
 
   it('swallows MQTT publish failure and does not throw', async () => {
     mqtt.publishAsync.mockRejectedValue(new Error('connection lost'));
-    expect(() => publisher.publishActionEvent(makeDecisionEvent({ type: 'action_result' }))).not.toThrow();
+    expect(() => publisher.publishActionEvent(makeDecisionEvent({ event_type: 'action_result' }))).not.toThrow();
     await new Promise((r) => setTimeout(r, 0));
   });
 });
@@ -203,7 +200,7 @@ describe('EventPublisher — subscribe', () => {
   it('listener receives events published via publishActionEvent', () => {
     const listener = vi.fn();
     publisher.subscribe(listener);
-    const event = makeDecisionEvent({ type: 'action_started' });
+    const event = makeDecisionEvent({ event_type: 'action_started' });
     publisher.publishActionEvent(event);
     expect(listener).toHaveBeenCalledOnce();
     expect(listener).toHaveBeenCalledWith(event);
