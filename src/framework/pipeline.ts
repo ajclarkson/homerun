@@ -2,11 +2,11 @@ import type { Automation } from '../types/automation.js';
 import type { TriggerEvent } from '../types/triggers.js';
 import { isAbort } from '../types/automation.js';
 import type { HAClient } from './ha-client.js';
-import type { Observability, ObsEvent } from './observability.js';
+import type { EventPublisher, ObsEvent } from './event-publisher.js';
 import type { ActionRuntime } from './action-runtime.js';
 
 interface Deps {
-  observability: Observability;
+  eventPublisher: EventPublisher;
   actionRuntime: ActionRuntime;
   dryRun?: boolean;
 }
@@ -32,7 +32,7 @@ export async function runPipeline(
 
   // Step 1: Enabled check
   if (automation.enabled === false) {
-    deps.observability.publishDecision({ ...base, event_type: 'abort', reason: 'disabled' });
+    deps.eventPublisher.publishDecision({ ...base, event_type: 'abort', reason: 'disabled' });
     return;
   }
 
@@ -41,12 +41,12 @@ export async function runPipeline(
   try {
     ctx = automation.context(haClient.state, haClient.context, event);
   } catch {
-    deps.observability.publishDecision({ ...base, event_type: 'abort', reason: 'unhandled_error' });
+    deps.eventPublisher.publishDecision({ ...base, event_type: 'abort', reason: 'unhandled_error' });
     return;
   }
 
   if (isAbort(ctx)) {
-    deps.observability.publishDecision({ ...base, event_type: 'abort', reason: ctx.reason });
+    deps.eventPublisher.publishDecision({ ...base, event_type: 'abort', reason: ctx.reason });
     return;
   }
 
@@ -55,7 +55,7 @@ export async function runPipeline(
   try {
     result = automation.reduce(ctx);
   } catch {
-    deps.observability.publishDecision({ ...base, event_type: 'abort', reason: 'unhandled_error' });
+    deps.eventPublisher.publishDecision({ ...base, event_type: 'abort', reason: 'unhandled_error' });
     return;
   }
 
@@ -72,7 +72,7 @@ export async function runPipeline(
 
   // Step 5: Fanout
   await Promise.all([
-    Promise.resolve(deps.observability.publishDecision(decision)),
+    Promise.resolve(deps.eventPublisher.publishDecision(decision)),
     deps.actionRuntime.execute(actions, {
       correlationId,
       automationId: automation.id,

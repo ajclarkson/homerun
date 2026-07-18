@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Observability } from './observability.js';
-import type { ObsEvent } from './observability.js';
+import { EventPublisher } from './event-publisher.js';
+import type { ObsEvent } from './event-publisher.js';
 import type { MqttClient } from 'mqtt';
 
 // ---------- Helpers ----------
@@ -32,17 +32,17 @@ function makeDecisionEvent(overrides: Partial<ObsEvent> = {}): ObsEvent {
 
 // ---------- Tests ----------
 
-describe('Observability — publishDecision', () => {
+describe('EventPublisher — publishDecision', () => {
   let mqtt: MockMqtt;
-  let obs: Observability;
+  let publisher: EventPublisher;
 
   beforeEach(() => {
     mqtt = makeMqtt();
-    obs = new Observability(mqtt as unknown as MqttClient);
+    publisher = new EventPublisher(mqtt as unknown as MqttClient);
   });
 
   it('publishes the event to homerun/events (not retained)', async () => {
-    obs.publishDecision(makeDecisionEvent());
+    publisher.publishDecision(makeDecisionEvent());
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalled());
 
     const call = callForTopic(mqtt, 'homerun/events')!;
@@ -52,7 +52,7 @@ describe('Observability — publishDecision', () => {
   });
 
   it('publishes the event retained to homerun/{location}/{subsystem}/decision', async () => {
-    obs.publishDecision(makeDecisionEvent());
+    publisher.publishDecision(makeDecisionEvent());
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalledTimes(2));
 
     const call = callForTopic(mqtt, 'homerun/parlour/lighting/decision');
@@ -61,7 +61,7 @@ describe('Observability — publishDecision', () => {
   });
 
   it('publishes the correct schema version on the retained topic', async () => {
-    obs.publishDecision(makeDecisionEvent());
+    publisher.publishDecision(makeDecisionEvent());
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalledTimes(2));
 
     const call = callForTopic(mqtt, 'homerun/parlour/lighting/decision')!;
@@ -69,7 +69,7 @@ describe('Observability — publishDecision', () => {
   });
 
   it('routes dry_run events to homerun/dev/* topics', async () => {
-    obs.publishDecision(makeDecisionEvent({ dry_run: true }));
+    publisher.publishDecision(makeDecisionEvent({ dry_run: true }));
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalledTimes(2));
 
     expect(callForTopic(mqtt, 'homerun/dev/events')).toBeDefined();
@@ -80,22 +80,22 @@ describe('Observability — publishDecision', () => {
 
   it('swallows MQTT publish failure and does not throw', async () => {
     mqtt.publishAsync.mockRejectedValue(new Error('connection lost'));
-    expect(() => obs.publishDecision(makeDecisionEvent())).not.toThrow();
+    expect(() => publisher.publishDecision(makeDecisionEvent())).not.toThrow();
     await new Promise((r) => setTimeout(r, 0));
   });
 });
 
-describe('Observability — publishActionEvent', () => {
+describe('EventPublisher — publishActionEvent', () => {
   let mqtt: MockMqtt;
-  let obs: Observability;
+  let publisher: EventPublisher;
 
   beforeEach(() => {
     mqtt = makeMqtt();
-    obs = new Observability(mqtt as unknown as MqttClient);
+    publisher = new EventPublisher(mqtt as unknown as MqttClient);
   });
 
   it('publishes an abort event to homerun/events with type: abort', async () => {
-    obs.publishActionEvent(makeDecisionEvent({ type: 'abort', reason: 'guard_failed' }));
+    publisher.publishActionEvent(makeDecisionEvent({ type: 'abort', reason: 'guard_failed' }));
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalled());
 
     const call = callForTopic(mqtt, 'homerun/events')!;
@@ -105,14 +105,14 @@ describe('Observability — publishActionEvent', () => {
   });
 
   it('does not publish to the retained decision topic for action events', async () => {
-    obs.publishActionEvent(makeDecisionEvent({ type: 'action_started' }));
+    publisher.publishActionEvent(makeDecisionEvent({ type: 'action_started' }));
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalled());
 
     expect(callForTopic(mqtt, 'homerun/parlour/lighting/decision')).toBeUndefined();
   });
 
   it('routes dry_run action events to homerun/dev/events', async () => {
-    obs.publishActionEvent(makeDecisionEvent({ type: 'action_started', dry_run: true }));
+    publisher.publishActionEvent(makeDecisionEvent({ type: 'action_started', dry_run: true }));
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalled());
 
     expect(callForTopic(mqtt, 'homerun/dev/events')).toBeDefined();
@@ -121,22 +121,22 @@ describe('Observability — publishActionEvent', () => {
 
   it('swallows MQTT publish failure and does not throw', async () => {
     mqtt.publishAsync.mockRejectedValue(new Error('connection lost'));
-    expect(() => obs.publishActionEvent(makeDecisionEvent({ type: 'action_result' }))).not.toThrow();
+    expect(() => publisher.publishActionEvent(makeDecisionEvent({ type: 'action_result' }))).not.toThrow();
     await new Promise((r) => setTimeout(r, 0));
   });
 });
 
-describe('Observability — publishLifecycle', () => {
+describe('EventPublisher — publishLifecycle', () => {
   let mqtt: MockMqtt;
-  let obs: Observability;
+  let publisher: EventPublisher;
 
   beforeEach(() => {
     mqtt = makeMqtt();
-    obs = new Observability(mqtt as unknown as MqttClient);
+    publisher = new EventPublisher(mqtt as unknown as MqttClient);
   });
 
   it('publishes to homerun/lifecycle (not retained)', async () => {
-    obs.publishLifecycle('server_started', 5);
+    publisher.publishLifecycle('server_started', 5);
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalled());
 
     const call = callForTopic(mqtt, 'homerun/lifecycle')!;
@@ -148,7 +148,7 @@ describe('Observability — publishLifecycle', () => {
   });
 
   it('publishes to homerun/status (retained) with online status', async () => {
-    obs.publishLifecycle('server_started', 5);
+    publisher.publishLifecycle('server_started', 5);
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalledTimes(2));
 
     const call = callForTopic(mqtt, 'homerun/status')!;
@@ -158,7 +158,7 @@ describe('Observability — publishLifecycle', () => {
   });
 
   it('routes dry_run lifecycle events to homerun/dev/* topics', async () => {
-    obs.publishLifecycle('rescan_complete', 3, true);
+    publisher.publishLifecycle('rescan_complete', 3, true);
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalledTimes(2));
 
     expect(callForTopic(mqtt, 'homerun/dev/lifecycle')).toBeDefined();
@@ -168,7 +168,7 @@ describe('Observability — publishLifecycle', () => {
   });
 
   it('includes dry_run flag in the lifecycle payload when true', async () => {
-    obs.publishLifecycle('ha_reconnected', 2, true);
+    publisher.publishLifecycle('ha_reconnected', 2, true);
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalled());
 
     const call = callForTopic(mqtt, 'homerun/dev/lifecycle')!;
@@ -177,34 +177,34 @@ describe('Observability — publishLifecycle', () => {
 
   it('swallows MQTT publish failure and does not throw', async () => {
     mqtt.publishAsync.mockRejectedValue(new Error('connection lost'));
-    expect(() => obs.publishLifecycle('server_started', 1)).not.toThrow();
+    expect(() => publisher.publishLifecycle('server_started', 1)).not.toThrow();
     await new Promise((r) => setTimeout(r, 0));
   });
 });
 
-describe('Observability — subscribe', () => {
+describe('EventPublisher — subscribe', () => {
   let mqtt: MockMqtt;
-  let obs: Observability;
+  let publisher: EventPublisher;
 
   beforeEach(() => {
     mqtt = makeMqtt();
-    obs = new Observability(mqtt as unknown as MqttClient);
+    publisher = new EventPublisher(mqtt as unknown as MqttClient);
   });
 
   it('listener receives events published via publishDecision', () => {
     const listener = vi.fn();
-    obs.subscribe(listener);
+    publisher.subscribe(listener);
     const event = makeDecisionEvent();
-    obs.publishDecision(event);
+    publisher.publishDecision(event);
     expect(listener).toHaveBeenCalledOnce();
     expect(listener).toHaveBeenCalledWith(event);
   });
 
   it('listener receives events published via publishActionEvent', () => {
     const listener = vi.fn();
-    obs.subscribe(listener);
+    publisher.subscribe(listener);
     const event = makeDecisionEvent({ type: 'action_started' });
-    obs.publishActionEvent(event);
+    publisher.publishActionEvent(event);
     expect(listener).toHaveBeenCalledOnce();
     expect(listener).toHaveBeenCalledWith(event);
   });
@@ -212,28 +212,28 @@ describe('Observability — subscribe', () => {
   it('multiple listeners all receive the event', () => {
     const l1 = vi.fn();
     const l2 = vi.fn();
-    obs.subscribe(l1);
-    obs.subscribe(l2);
-    obs.publishDecision(makeDecisionEvent());
+    publisher.subscribe(l1);
+    publisher.subscribe(l2);
+    publisher.publishDecision(makeDecisionEvent());
     expect(l1).toHaveBeenCalledOnce();
     expect(l2).toHaveBeenCalledOnce();
   });
 
   it('unsubscribe removes the listener', () => {
     const listener = vi.fn();
-    const unsubscribe = obs.subscribe(listener);
+    const unsubscribe = publisher.subscribe(listener);
     unsubscribe();
-    obs.publishDecision(makeDecisionEvent());
+    publisher.publishDecision(makeDecisionEvent());
     expect(listener).not.toHaveBeenCalled();
   });
 
   it('unsubscribing one listener does not affect others', () => {
     const l1 = vi.fn();
     const l2 = vi.fn();
-    const unsub1 = obs.subscribe(l1);
-    obs.subscribe(l2);
+    const unsub1 = publisher.subscribe(l1);
+    publisher.subscribe(l2);
     unsub1();
-    obs.publishDecision(makeDecisionEvent());
+    publisher.publishDecision(makeDecisionEvent());
     expect(l1).not.toHaveBeenCalled();
     expect(l2).toHaveBeenCalledOnce();
   });

@@ -8,7 +8,7 @@ import { abort } from '../types/automation.js';
 
 function makeDeps() {
   return {
-    observability: { publishDecision: vi.fn(), publishActionEvent: vi.fn() },
+    eventPublisher: { publishDecision: vi.fn(), publishActionEvent: vi.fn() },
     actionRuntime: { execute: vi.fn().mockResolvedValue(undefined) },
   };
 }
@@ -77,7 +77,7 @@ describe('runPipeline — happy path', () => {
 
   it('publishes a decision ObsEvent with correct fields', async () => {
     await runPipeline(auto, onStartEvent, ha as never, deps as never);
-    const [event] = deps.observability.publishDecision.mock.calls[0] as [Record<string, unknown>];
+    const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
     expect(event).toMatchObject({
       schema: 'home.events.v1',
       automation_id: 'parlour:lighting',
@@ -98,13 +98,13 @@ describe('runPipeline — happy path', () => {
   it('uses the correlation_id from the event, not a generated one', async () => {
     const event: TriggerEvent = { type: 'on_start', correlation_id: 'fixed-id-abc' };
     await runPipeline(auto, event, ha as never, deps as never);
-    const [obsEvent] = deps.observability.publishDecision.mock.calls[0] as [Record<string, unknown>];
+    const [obsEvent] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
     expect(obsEvent.correlation_id).toBe('fixed-id-abc');
   });
 
   it('correlation_id on ObsEvent matches the one passed to actionRuntime', async () => {
     await runPipeline(auto, onStartEvent, ha as never, deps as never);
-    const [obsEvent] = deps.observability.publishDecision.mock.calls[0] as [Record<string, unknown>];
+    const [obsEvent] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
     const [, ctx] = deps.actionRuntime.execute.mock.calls[0] as [unknown, { correlationId: string }];
     expect(obsEvent.correlation_id).toBe(ctx.correlationId);
   });
@@ -128,7 +128,7 @@ describe('runPipeline — disabled automation', () => {
     await runPipeline(auto, onStartEvent, ha as never, deps as never);
     expect(auto.context).not.toHaveBeenCalled();
     expect(auto.reduce).not.toHaveBeenCalled();
-    const [event] = deps.observability.publishDecision.mock.calls[0] as [Record<string, unknown>];
+    const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
     expect(event.event_type).toBe('abort');
     expect(event.reason).toBe('disabled');
   });
@@ -163,7 +163,7 @@ describe('runPipeline — abort from context', () => {
     });
     await runPipeline(auto, onStartEvent, ha as never, deps as never);
     expect(auto.reduce).not.toHaveBeenCalled();
-    const [event] = deps.observability.publishDecision.mock.calls[0] as [Record<string, unknown>];
+    const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
     expect(event.event_type).toBe('abort');
     expect(event.reason).toBe('guard_failed');
   });
@@ -185,7 +185,7 @@ describe('runPipeline — exception in context', () => {
     const ha = makeHAClient();
     const auto = makeAutomation({ context: vi.fn().mockImplementation(() => { throw new Error('boom'); }) });
     await runPipeline(auto, onStartEvent, ha as never, deps as never);
-    const [event] = deps.observability.publishDecision.mock.calls[0] as [Record<string, unknown>];
+    const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
     expect(event.event_type).toBe('abort');
     expect(event.reason).toBe('unhandled_error');
   });
@@ -201,7 +201,7 @@ describe('runPipeline — exception in context', () => {
       runPipeline(healthy, onStartEvent, ha as never, deps as never),
     ]);
 
-    expect(deps.observability.publishDecision).toHaveBeenCalledTimes(2);
+    expect(deps.eventPublisher.publishDecision).toHaveBeenCalledTimes(2);
     expect(healthy.reduce).toHaveBeenCalled();
   });
 });
@@ -214,7 +214,7 @@ describe('runPipeline — exception in reduce', () => {
     const ha = makeHAClient();
     const auto = makeAutomation({ reduce: vi.fn().mockImplementation(() => { throw new Error('reduce failed'); }) });
     await runPipeline(auto, onStartEvent, ha as never, deps as never);
-    const [event] = deps.observability.publishDecision.mock.calls[0] as [Record<string, unknown>];
+    const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
     expect(event.event_type).toBe('abort');
     expect(event.reason).toBe('unhandled_error');
   });
@@ -228,7 +228,7 @@ describe('runPipeline — dry-run mode', () => {
     const ha = makeHAClient();
     const auto = makeAutomation();
     await runPipeline(auto, onStartEvent, ha as never, deps as never);
-    const [event] = deps.observability.publishDecision.mock.calls[0] as [Record<string, unknown>];
+    const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
     expect(event.dry_run).toBe(true);
   });
 
@@ -237,7 +237,7 @@ describe('runPipeline — dry-run mode', () => {
     const ha = makeHAClient();
     const auto = makeAutomation();
     await runPipeline(auto, onStartEvent, ha as never, deps as never);
-    const [event] = deps.observability.publishDecision.mock.calls[0] as [Record<string, unknown>];
+    const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
     expect(event.dry_run).toBeUndefined();
   });
 
@@ -246,7 +246,7 @@ describe('runPipeline — dry-run mode', () => {
     const ha = makeHAClient();
     const auto = makeAutomation({ context: vi.fn().mockReturnValue(abort('guard_failed')) });
     await runPipeline(auto, onStartEvent, ha as never, deps as never);
-    const [event] = deps.observability.publishDecision.mock.calls[0] as [Record<string, unknown>];
+    const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
     expect(event.dry_run).toBe(true);
   });
 });

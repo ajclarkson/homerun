@@ -256,9 +256,16 @@ function matchesTrigger(trigger: Trigger, event: TriggerEvent): boolean {
   switch (trigger.type) {
     case 'state_changed': {
       if (event.type !== 'state_changed') return false;
-      return typeof trigger.entity === 'string'
+      const entityMatch = typeof trigger.entity === 'string'
         ? trigger.entity === event.entity_id
         : trigger.entity.test(event.entity_id);
+      if (!entityMatch) return false;
+      if (trigger.to !== undefined) {
+        const allowed = Array.isArray(trigger.to) ? trigger.to : [trigger.to];
+        if (!allowed.includes(event.new_state.state)) return false;
+        if (event.old_state?.state === event.new_state.state) return false;
+      }
+      return true;
     }
     case 'timer_expired': {
       if (event.type !== 'timer_expired') return false;

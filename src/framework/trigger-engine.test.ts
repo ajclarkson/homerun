@@ -221,6 +221,106 @@ describe('TriggerEngine', () => {
 
       expect(onMatch).toHaveBeenCalledOnce();
     });
+
+    it('fires when new state matches a single `to` string', async () => {
+      const { client, resolveReady, emitStateChanged } = makeMockHAClient();
+      const onMatch = vi.fn();
+      const automation = makeAutomation('a', [{ type: 'state_changed', entity: 'binary_sensor.door', to: 'on' }]);
+
+      const engine = new TriggerEngine(makeRegistry(automation), client, onMatch);
+      engine.start();
+      resolveReady();
+      await vi.runAllTimersAsync();
+
+      emitStateChanged({
+        entity_id: 'binary_sensor.door',
+        old_state: makeEntityState('off', 'binary_sensor.door'),
+        new_state: makeEntityState('on', 'binary_sensor.door'),
+        correlation_id: 'test-cid',
+      });
+
+      expect(onMatch).toHaveBeenCalledOnce();
+    });
+
+    it('does not fire when new state does not match `to` string', async () => {
+      const { client, resolveReady, emitStateChanged } = makeMockHAClient();
+      const onMatch = vi.fn();
+      const automation = makeAutomation('a', [{ type: 'state_changed', entity: 'binary_sensor.door', to: 'on' }]);
+
+      const engine = new TriggerEngine(makeRegistry(automation), client, onMatch);
+      engine.start();
+      resolveReady();
+      await vi.runAllTimersAsync();
+
+      emitStateChanged({
+        entity_id: 'binary_sensor.door',
+        old_state: makeEntityState('on', 'binary_sensor.door'),
+        new_state: makeEntityState('off', 'binary_sensor.door'),
+        correlation_id: 'test-cid',
+      });
+
+      expect(onMatch).not.toHaveBeenCalled();
+    });
+
+    it('fires when new state matches one of the `to` array values', async () => {
+      const { client, resolveReady, emitStateChanged } = makeMockHAClient();
+      const onMatch = vi.fn();
+      const automation = makeAutomation('a', [{ type: 'state_changed', entity: 'input_select.mode', to: ['sleep', 'away'] }]);
+
+      const engine = new TriggerEngine(makeRegistry(automation), client, onMatch);
+      engine.start();
+      resolveReady();
+      await vi.runAllTimersAsync();
+
+      emitStateChanged({
+        entity_id: 'input_select.mode',
+        old_state: makeEntityState('normal', 'input_select.mode'),
+        new_state: makeEntityState('sleep', 'input_select.mode'),
+        correlation_id: 'test-cid',
+      });
+
+      expect(onMatch).toHaveBeenCalledOnce();
+    });
+
+    it('does not fire when new state is not in the `to` array', async () => {
+      const { client, resolveReady, emitStateChanged } = makeMockHAClient();
+      const onMatch = vi.fn();
+      const automation = makeAutomation('a', [{ type: 'state_changed', entity: 'input_select.mode', to: ['sleep', 'away'] }]);
+
+      const engine = new TriggerEngine(makeRegistry(automation), client, onMatch);
+      engine.start();
+      resolveReady();
+      await vi.runAllTimersAsync();
+
+      emitStateChanged({
+        entity_id: 'input_select.mode',
+        old_state: makeEntityState('sleep', 'input_select.mode'),
+        new_state: makeEntityState('normal', 'input_select.mode'),
+        correlation_id: 'test-cid',
+      });
+
+      expect(onMatch).not.toHaveBeenCalled();
+    });
+
+    it('does not fire when `to` matches but state value has not changed (attribute-only update)', async () => {
+      const { client, resolveReady, emitStateChanged } = makeMockHAClient();
+      const onMatch = vi.fn();
+      const automation = makeAutomation('a', [{ type: 'state_changed', entity: 'light.kitchen', to: 'on' }]);
+
+      const engine = new TriggerEngine(makeRegistry(automation), client, onMatch);
+      engine.start();
+      resolveReady();
+      await vi.runAllTimersAsync();
+
+      emitStateChanged({
+        entity_id: 'light.kitchen',
+        old_state: makeEntityState('on', 'light.kitchen'),
+        new_state: makeEntityState('on', 'light.kitchen'),
+        correlation_id: 'test-cid',
+      });
+
+      expect(onMatch).not.toHaveBeenCalled();
+    });
   });
 
   // ---------- on_start ----------
