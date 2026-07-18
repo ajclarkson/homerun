@@ -16,7 +16,7 @@ export interface ObsEvent {
   timestamp: string;
 }
 
-export type LifecycleEventType = 'server_started' | 'rescan_complete' | 'ha_reconnected';
+export type LifecycleEventType = 'server_started' | 'server_stopping' | 'rescan_complete' | 'ha_reconnected';
 
 export interface LifecycleEvent {
   schema: 'home.lifecycle.v1';
