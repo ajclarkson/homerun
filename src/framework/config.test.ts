@@ -56,7 +56,7 @@ mqtt:
 automations:
   dir: ./automations
 `;
-    const config = parseConfig(configContent, 'ha_token: my-secret-token\n', {});
+    const config = parseConfig(configContent, 'ha_token: my-secret-token\n');
     expect(config.homeassistant.token).toBe('my-secret-token');
   });
 
@@ -70,63 +70,11 @@ mqtt:
 automations:
   dir: ./automations
 `;
-    expect(() => parseConfig(configContent, 'ha_token: value\n', {})).toThrow("!secret 'missing_key' not found");
+    expect(() => parseConfig(configContent, 'ha_token: value\n')).toThrow("!secret 'missing_key' not found");
   });
 
   it('works without secrets content when no !secret tags are present', () => {
-    expect(() => parseConfig(MINIMAL, undefined, {})).not.toThrow();
-  });
-});
-
-// ---------- Env var overrides ----------
-
-describe('parseConfig — HOMERUN_* env var overrides', () => {
-  it('HOMERUN_HA_URL overrides homeassistant.url', () => {
-    const config = parseConfig(MINIMAL, undefined, { HOMERUN_HA_URL: 'http://override:8123' });
-    expect(config.homeassistant.url).toBe('http://override:8123');
-  });
-
-  it('HOMERUN_HA_TOKEN overrides homeassistant.token', () => {
-    const config = parseConfig(MINIMAL, undefined, { HOMERUN_HA_TOKEN: 'override-token' });
-    expect(config.homeassistant.token).toBe('override-token');
-  });
-
-  it('HOMERUN_MQTT_URL overrides mqtt.url', () => {
-    const config = parseConfig(MINIMAL, undefined, { HOMERUN_MQTT_URL: 'mqtt://other:1883' });
-    expect(config.mqtt.url).toBe('mqtt://other:1883');
-  });
-
-  it('HOMERUN_AUTOMATIONS_DIR overrides automations.dir', () => {
-    const config = parseConfig(MINIMAL, undefined, { HOMERUN_AUTOMATIONS_DIR: '/custom/path' });
-    expect(config.automations.dir).toBe('/custom/path');
-  });
-
-  it('HOMERUN_SERVER_PORT is coerced to integer', () => {
-    const config = parseConfig(MINIMAL, undefined, { HOMERUN_SERVER_PORT: '9000' });
-    expect(config.server.port).toBe(9000);
-  });
-
-  it('HOMERUN_DRY_RUN=true is coerced to boolean true', () => {
-    const config = parseConfig(MINIMAL, undefined, { HOMERUN_DRY_RUN: 'true' });
-    expect(config.options.dry_run).toBe(true);
-  });
-
-  it('HOMERUN_DRY_RUN=false is coerced to boolean false', () => {
-    const content = MINIMAL + '\noptions:\n  dry_run: true';
-    const config = parseConfig(content, undefined, { HOMERUN_DRY_RUN: 'false' });
-    expect(config.options.dry_run).toBe(false);
-  });
-
-  it('env overrides work when optional config sections are absent', () => {
-    const config = parseConfig(MINIMAL, undefined, { HOMERUN_SERVER_PORT: '9999', HOMERUN_DRY_RUN: 'true' });
-    expect(config.server.port).toBe(9999);
-    expect(config.options.dry_run).toBe(true);
-  });
-
-  it('env overrides take precedence over config file values', () => {
-    const content = MINIMAL + '\nserver:\n  port: 8080';
-    const config = parseConfig(content, undefined, { HOMERUN_SERVER_PORT: '9999' });
-    expect(config.server.port).toBe(9999);
+    expect(() => parseConfig(MINIMAL)).not.toThrow();
   });
 });
 
@@ -140,7 +88,7 @@ mqtt:
 automations:
   dir: ./automations
 `;
-    expect(() => parseConfig(content, undefined, {})).toThrow('Invalid configuration');
+    expect(() => parseConfig(content)).toThrow('Invalid configuration');
   });
 
   it('throws when homeassistant.url is missing', () => {
@@ -152,7 +100,7 @@ mqtt:
 automations:
   dir: ./automations
 `;
-    expect(() => parseConfig(content, undefined, {})).toThrow('Invalid configuration');
+    expect(() => parseConfig(content)).toThrow('Invalid configuration');
   });
 
   it('throws when homeassistant.token is missing', () => {
@@ -164,7 +112,7 @@ mqtt:
 automations:
   dir: ./automations
 `;
-    expect(() => parseConfig(content, undefined, {})).toThrow('Invalid configuration');
+    expect(() => parseConfig(content)).toThrow('Invalid configuration');
   });
 
   it('error message includes the failing field path', () => {
@@ -176,7 +124,7 @@ mqtt:
 automations:
   dir: ./automations
 `;
-    expect(() => parseConfig(content, undefined, {})).toThrow('homeassistant.token');
+    expect(() => parseConfig(content)).toThrow('homeassistant.token');
   });
 
   it('throws when mqtt.url is missing', () => {
@@ -187,7 +135,7 @@ homeassistant:
 automations:
   dir: ./automations
 `;
-    expect(() => parseConfig(content, undefined, {})).toThrow('Invalid configuration');
+    expect(() => parseConfig(content)).toThrow('Invalid configuration');
   });
 
   it('throws when automations.dir is missing', () => {
@@ -198,6 +146,6 @@ homeassistant:
 mqtt:
   url: mqtt://localhost:1883
 `;
-    expect(() => parseConfig(content, undefined, {})).toThrow('Invalid configuration');
+    expect(() => parseConfig(content)).toThrow('Invalid configuration');
   });
 });

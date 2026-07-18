@@ -39,32 +39,6 @@ const ConfigSchema = z.object({
 
 export type HomerunConfig = z.infer<typeof ConfigSchema>;
 
-// Explicit env var mapping — adding a new config key means adding a line here
-const ENV_OVERRIDES: Array<{
-  key: string;
-  path: string[];
-  parse?: (v: string) => unknown;
-}> = [
-  { key: 'HOMERUN_HA_URL', path: ['homeassistant', 'url'] },
-  { key: 'HOMERUN_HA_TOKEN', path: ['homeassistant', 'token'] },
-  { key: 'HOMERUN_MQTT_URL', path: ['mqtt', 'url'] },
-  { key: 'HOMERUN_AUTOMATIONS_DIR', path: ['automations', 'dir'] },
-  { key: 'HOMERUN_SERVER_PORT', path: ['server', 'port'], parse: (v) => parseInt(v, 10) },
-  { key: 'HOMERUN_DRY_RUN', path: ['options', 'dry_run'], parse: (v) => v === 'true' },
-];
-
-function setDeep(obj: Record<string, unknown>, keys: string[], value: unknown): void {
-  const [head, ...rest] = keys;
-  if (rest.length === 0) {
-    obj[head] = value;
-    return;
-  }
-  if (typeof obj[head] !== 'object' || obj[head] === null) {
-    obj[head] = {};
-  }
-  setDeep(obj[head] as Record<string, unknown>, rest, value);
-}
-
 function resolveSecrets(value: unknown, secrets: Record<string, unknown>): unknown {
   if (isSecretRef(value)) {
     const key = value.__secret;
@@ -87,7 +61,6 @@ function resolveSecrets(value: unknown, secrets: Record<string, unknown>): unkno
 export function parseConfig(
   configContent: string,
   secretsContent?: string,
-  env: Record<string, string | undefined> = process.env as Record<string, string | undefined>,
 ): HomerunConfig {
   const raw = (load(configContent, { schema: SCHEMA_WITH_SECRET }) ?? {}) as Record<string, unknown>;
 
@@ -96,13 +69,6 @@ export function parseConfig(
     : {};
 
   const resolved = resolveSecrets(raw, secrets) as Record<string, unknown>;
-
-  for (const { key, path: keyPath, parse } of ENV_OVERRIDES) {
-    const val = env[key];
-    if (val !== undefined) {
-      setDeep(resolved, keyPath, parse ? parse(val) : val);
-    }
-  }
 
   const result = ConfigSchema.safeParse(resolved);
   if (!result.success) {
