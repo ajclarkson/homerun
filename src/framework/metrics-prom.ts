@@ -1,4 +1,4 @@
-import { Registry, Counter, Histogram, collectDefaultMetrics } from 'prom-client';
+import { Registry, Counter, Gauge, Histogram, collectDefaultMetrics } from 'prom-client';
 import type { MetricsBackend } from './metrics.js';
 
 export class PromMetricsBackend implements MetricsBackend {
@@ -10,6 +10,7 @@ export class PromMetricsBackend implements MetricsBackend {
   private readonly actionsSucceededTotal: Counter;
   private readonly actionsFailedTotal: Counter;
   private readonly actionDurationSeconds: Histogram;
+  private readonly automationsLoaded: Gauge;
 
   constructor(collectDefaults = false) {
     if (collectDefaults) {
@@ -58,6 +59,12 @@ export class PromMetricsBackend implements MetricsBackend {
       buckets: [0.01, 0.05, 0.1, 0.5, 1, 2, 5],
       registers: [this.registry],
     });
+
+    this.automationsLoaded = new Gauge({
+      name: 'homerun_automations_loaded',
+      help: 'Number of automations currently loaded',
+      registers: [this.registry],
+    });
   }
 
   incrementCounter(name: string, labels: Record<string, string> = {}): void {
@@ -73,6 +80,12 @@ export class PromMetricsBackend implements MetricsBackend {
   observeHistogram(name: string, value: number, labels: Record<string, string> = {}): void {
     if (name === 'homerun_action_duration_seconds') {
       this.actionDurationSeconds.observe(labels, value);
+    }
+  }
+
+  setGauge(name: string, value: number): void {
+    if (name === 'homerun_automations_loaded') {
+      this.automationsLoaded.set(value);
     }
   }
 
