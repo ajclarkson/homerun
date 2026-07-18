@@ -199,9 +199,6 @@ export class TriggerEngine {
       this.mqttClient.subscribe('homerun/trigger/+');
 
       this.mqttClient.on('message', (topic: string, payload: Buffer) => {
-        if (!topic.startsWith('homerun/trigger/')) {
-          this.metrics?.incrementCounter('homerun_ha_events_received_total', { event_type: 'mqtt_in' });
-        }
         if (topic.startsWith('homerun/trigger/')) {
           const automationId = topic.slice('homerun/trigger/'.length);
           const automation = this.registry.getById(automationId);
