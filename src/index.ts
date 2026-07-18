@@ -59,7 +59,9 @@ const actionRuntime = new ActionRuntime({
 const automationsDir = path.resolve(config.automations.dir);
 
 await rescanAutomations(automationsDir, registry);
-console.log(`[homerun] loaded ${registry.getAll().length} automation(s)`);
+const initialCount = registry.getAll().length;
+metricsBackend.setGauge('homerun_automations_loaded', initialCount);
+console.log(`[homerun] loaded ${initialCount} automation(s)`);
 
 // 4. Wire up the engine and scheduler.
 //    Track in-flight pipelines so graceful shutdown can drain before exit.
@@ -90,6 +92,7 @@ startHotReload(automationsDir, registry);
 async function reload(): Promise<void> {
   await rescanAutomations(automationsDir, registry);
   const count = registry.getAll().length;
+  metricsBackend.setGauge('homerun_automations_loaded', count);
   console.log(`[homerun] rescan complete — ${count} automation(s) registered`);
   eventPublisher.publishLifecycle('rescan_complete', count, dryRun);
 }
