@@ -24,11 +24,14 @@
     "test": "vitest",
     "test:run": "vitest run",
     "generate:ha-types": "tsx scripts/generate-ha-types.ts",
-    "generate:ha-types:compiled": "homerun-generate-ha-types"
+    "generate:ha-types:compiled": "homerun-generate-ha-types",
+    "generate:ha-services": "tsx scripts/generate-ha-services.ts",
+    "generate:ha-services:compiled": "homerun-generate-ha-services"
   },
   "bin": {
     "homerun": "./dist/src/index.js",
-    "homerun-generate-ha-types": "./dist/scripts/generate-ha-types.js"
+    "homerun-generate-ha-types": "./dist/scripts/generate-ha-types.js",
+    "homerun-generate-ha-services": "./dist/scripts/generate-ha-services.js"
   },
   "repository": {
     "type": "git",
