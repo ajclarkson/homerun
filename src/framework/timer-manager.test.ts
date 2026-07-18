@@ -83,4 +83,33 @@ describe('TimerManager', () => {
     expect(dispatch).toHaveBeenCalledOnce();
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'timer_expired', timerKey: 'room:heating:off' }));
   });
+
+  it('cancelAll prevents all pending timers from firing', () => {
+    const dispatch = vi.fn<(e: TriggerEvent) => void>();
+    const tm = new TimerManager(dispatch);
+
+    tm.start('room:lights:off', 5000);
+    tm.start('room:heating:off', 5000);
+    tm.start('room:fan:off', 5000);
+    tm.cancelAll();
+    vi.advanceTimersByTime(5000);
+
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('cancelAll on an empty manager is a no-op and does not throw', () => {
+    const tm = new TimerManager(vi.fn());
+    expect(() => tm.cancelAll()).not.toThrow();
+  });
+
+  it('cancelAll is safe to call twice', () => {
+    const dispatch = vi.fn<(e: TriggerEvent) => void>();
+    const tm = new TimerManager(dispatch);
+
+    tm.start('room:lights:off', 5000);
+    tm.cancelAll();
+    expect(() => tm.cancelAll()).not.toThrow();
+    vi.advanceTimersByTime(5000);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
 });
