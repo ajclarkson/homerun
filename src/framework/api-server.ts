@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { Server } from 'node:http';
 import type { AutomationRegistry } from './registry.js';
-import type { Observability, ObsEvent } from './observability.js';
+import type { EventPublisher, ObsEvent } from './event-publisher.js';
 import type { Automation } from '../types/automation.js';
 import type { Trigger, TriggerEvent } from '../types/triggers.js';
 
@@ -11,7 +11,7 @@ export interface ApiServerDeps {
   onReload: () => Promise<void>;
   isReady: () => boolean;
   entityCount: () => number;
-  observability: Observability;
+  eventPublisher: EventPublisher;
   dryRun?: boolean;
 }
 
@@ -116,7 +116,7 @@ export class ApiServer {
     });
     res.flushHeaders();
 
-    const unsubscribe = this.deps.observability.subscribe((event: ObsEvent) => {
+    const unsubscribe = this.deps.eventPublisher.subscribe((event: ObsEvent) => {
       res.write(`data: ${JSON.stringify(event)}\n\n`);
     });
 

@@ -41,7 +41,7 @@ function makeHarness(automations: Automation<unknown>[]): Harness {
   const registry = new AutomationRegistry();
   for (const a of automations) registry.register(a);
   const engine = new TriggerEngine(registry, haClient, (automation, event) => {
-    runPipeline(automation, event, haClient, { observability: obs as never, actionRuntime: actionRuntime as never });
+    runPipeline(automation, event, haClient, { eventPublisher: obs as never, actionRuntime: actionRuntime as never });
   });
   engine.start();
 

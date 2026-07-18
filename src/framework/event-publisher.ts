@@ -26,7 +26,7 @@ export interface LifecycleEvent {
   dry_run?: boolean;
 }
 
-export class Observability {
+export class EventPublisher {
   private readonly listeners: Array<(event: ObsEvent) => void> = [];
 
   constructor(private readonly mqtt: MqttClient) {}
@@ -69,7 +69,7 @@ export class Observability {
 
   private publish(topic: string, payload: string, retain: boolean): void {
     this.mqtt.publishAsync(topic, payload, { retain }).catch((err: unknown) => {
-      console.error(`[Observability] MQTT publish failed on ${topic}:`, err);
+      console.error(`[EventPublisher] MQTT publish failed on ${topic}:`, err);
     });
   }
 }

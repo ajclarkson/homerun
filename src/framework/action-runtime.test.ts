@@ -9,8 +9,8 @@ function makeDeps(dryRun = false) {
   const haClient = { callService: vi.fn().mockResolvedValue(undefined) };
   const mqttClient = { publishAsync: vi.fn().mockResolvedValue(undefined) };
   const timerManager = { start: vi.fn(), cancel: vi.fn() };
-  const observability = { publishActionEvent: vi.fn() };
-  return { haClient, mqttClient, timerManager, observability, dryRun };
+  const eventPublisher = { publishActionEvent: vi.fn() };
+  return { haClient, mqttClient, timerManager, eventPublisher, dryRun };
 }
 
 function makeCtx(overrides: Partial<ExecutionContext> = {}): ExecutionContext {
@@ -41,14 +41,14 @@ describe('ActionRuntime — ha.call_service', () => {
     const rt = new ActionRuntime(deps as never);
     const action: Action = { type: 'ha.call_service', domain: 'light', service: 'turn_off' };
     await rt.execute([action], makeCtx());
-    const calls = deps.observability.publishActionEvent.mock.calls.map((c: unknown[]) => (c[0] as { event_type: string }).event_type);
+    const calls = deps.eventPublisher.publishActionEvent.mock.calls.map((c: unknown[]) => (c[0] as { event_type: string }).event_type);
     expect(calls).toEqual(['action_started', 'action_result']);
   });
 
   it('action_result carries reason: ok on success', async () => {
     const rt = new ActionRuntime(deps as never);
     await rt.execute([{ type: 'ha.call_service', domain: 'light', service: 'turn_off' }], makeCtx());
-    const result = deps.observability.publishActionEvent.mock.calls[1][0] as { reason: string };
+    const result = deps.eventPublisher.publishActionEvent.mock.calls[1][0] as { reason: string };
     expect(result.reason).toBe('ok');
   });
 
@@ -60,7 +60,7 @@ describe('ActionRuntime — ha.call_service', () => {
       { type: 'timer.cancel', timerKey: 'parlour:lighting:off-delay' },
     ];
     await rt.execute(actions, makeCtx());
-    const result = deps.observability.publishActionEvent.mock.calls[1][0] as { event_type: string; reason: string };
+    const result = deps.eventPublisher.publishActionEvent.mock.calls[1][0] as { event_type: string; reason: string };
     expect(result.event_type).toBe('action_result');
     expect(result.reason).toContain('HA unavailable');
     expect(deps.timerManager.cancel).toHaveBeenCalled();
@@ -114,7 +114,7 @@ describe('ActionRuntime — unknown action type', () => {
     const deps = makeDeps();
     const rt = new ActionRuntime(deps as never);
     await rt.execute([{ type: 'unknown.action' } as never], makeCtx());
-    const result = deps.observability.publishActionEvent.mock.calls[1][0] as { event_type: string; reason: string };
+    const result = deps.eventPublisher.publishActionEvent.mock.calls[1][0] as { event_type: string; reason: string };
     expect(result.event_type).toBe('action_result');
     expect(result.reason).toContain('unknown.action');
   });
@@ -152,7 +152,7 @@ describe('ActionRuntime — dry-run mode', () => {
   it('still emits action_started and action_result with dry_run: true', async () => {
     const rt = new ActionRuntime(deps as never);
     await rt.execute([{ type: 'ha.call_service', domain: 'light', service: 'turn_on' }], makeCtx());
-    const events = deps.observability.publishActionEvent.mock.calls.map((c: unknown[]) => c[0] as { event_type: string; dry_run: boolean });
+    const events = deps.eventPublisher.publishActionEvent.mock.calls.map((c: unknown[]) => c[0] as { event_type: string; dry_run: boolean });
     expect(events).toHaveLength(2);
     expect(events.every((e) => e.dry_run === true)).toBe(true);
   });
@@ -160,13 +160,13 @@ describe('ActionRuntime — dry-run mode', () => {
 
 // ---------- ObsEvent fields ----------
 
-describe('ActionRuntime — observability event fields', () => {
+describe('ActionRuntime — event publisher fields', () => {
   it('includes correlation_id, automation_id, location, subsystem on events', async () => {
     const deps = makeDeps();
     const rt = new ActionRuntime(deps as never);
     const ctx = makeCtx({ correlationId: 'cid-99', automationId: 'bedroom:heating', location: 'bedroom', subsystem: 'heating' });
     await rt.execute([{ type: 'ha.call_service', domain: 'climate', service: 'set_temperature' }], ctx);
-    const started = deps.observability.publishActionEvent.mock.calls[0][0] as Record<string, unknown>;
+    const started = deps.eventPublisher.publishActionEvent.mock.calls[0][0] as Record<string, unknown>;
     expect(started).toMatchObject({
       schema: 'home.events.v1',
       correlation_id: 'cid-99',
