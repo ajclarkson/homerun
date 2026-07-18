@@ -28,6 +28,10 @@ describe('parseConfig — valid configuration', () => {
     expect(parseConfig(MINIMAL).server.port).toBe(7070);
   });
 
+  it('defaults server.shutdown_timeout_ms to 10000', () => {
+    expect(parseConfig(MINIMAL).server.shutdown_timeout_ms).toBe(10_000);
+  });
+
   it('defaults options.dry_run to false', () => {
     expect(parseConfig(MINIMAL).options.dry_run).toBe(false);
   });
@@ -35,6 +39,11 @@ describe('parseConfig — valid configuration', () => {
   it('respects explicit server.port', () => {
     const config = parseConfig(MINIMAL + '\nserver:\n  port: 8080');
     expect(config.server.port).toBe(8080);
+  });
+
+  it('respects explicit server.shutdown_timeout_ms', () => {
+    const config = parseConfig(MINIMAL + '\nserver:\n  shutdown_timeout_ms: 5000');
+    expect(config.server.shutdown_timeout_ms).toBe(5000);
   });
 
   it('respects explicit options.dry_run: true', () => {

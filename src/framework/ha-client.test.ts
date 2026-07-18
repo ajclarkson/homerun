@@ -11,6 +11,7 @@ const mockConnection = {
     if (event === 'disconnected') capturedDisconnectListener = cb;
   }),
   sendMessagePromise: vi.fn(async () => []),
+  close: vi.fn(),
 };
 
 vi.mock('home-assistant-js-websocket', () => ({
@@ -436,6 +437,28 @@ describe('HAClient', () => {
 
       expect(client.context.entitiesByArea('old_room')).toEqual([]);
       expect(client.context.entitiesByArea('new_room')).toEqual(['light.a']);
+    });
+  });
+
+  describe('disconnect', () => {
+    it('calls close() on the underlying connection', async () => {
+      const { client } = await connectAndInitialise();
+      mockConnection.close.mockClear();
+      client.disconnect();
+      expect(mockConnection.close).toHaveBeenCalledOnce();
+    });
+
+    it('is safe to call when not yet connected', () => {
+      const client = new HAClient();
+      expect(() => client.disconnect()).not.toThrow();
+    });
+
+    it('is safe to call twice', async () => {
+      const { client } = await connectAndInitialise();
+      mockConnection.close.mockClear();
+      client.disconnect();
+      expect(() => client.disconnect()).not.toThrow();
+      expect(mockConnection.close).toHaveBeenCalledOnce();
     });
   });
 });

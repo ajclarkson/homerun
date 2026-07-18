@@ -234,7 +234,7 @@ describe('ApiServer', () => {
         automation_id: 'parlour:lighting',
         location: 'parlour',
         subsystem: 'lighting',
-        type: 'decision',
+        event_type: 'decision',
         decision: 'lights_on',
         timestamp: new Date().toISOString(),
       };
@@ -247,7 +247,7 @@ describe('ApiServer', () => {
 
       expect(text).toContain('data:');
       const jsonStr = text.replace(/^data:\s*/m, '').trim();
-      expect(JSON.parse(jsonStr)).toMatchObject({ automation_id: 'parlour:lighting', type: 'decision' });
+      expect(JSON.parse(jsonStr)).toMatchObject({ automation_id: 'parlour:lighting', event_type: 'decision' });
     });
 
     it('unsubscribes the SSE listener when the client disconnects', async () => {
