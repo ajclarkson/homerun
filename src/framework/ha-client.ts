@@ -94,6 +94,11 @@ export class HAClient extends EventEmitter {
     await callService(this.connection, domain, service, data, target);
   }
 
+  disconnect(): void {
+    this.connection?.close();
+    this.connection = null;
+  }
+
   async connect(url: string, token: string): Promise<void> {
     const auth = createLongLivedTokenAuth(url, token);
     this.connection = await createConnection({ auth });

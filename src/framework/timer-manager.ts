@@ -21,4 +21,9 @@ export class TimerManager {
       this.timers.delete(timerKey);
     }
   }
+
+  cancelAll(): void {
+    for (const handle of this.timers.values()) clearTimeout(handle);
+    this.timers.clear();
+  }
 }
