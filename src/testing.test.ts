@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { testAutomation } from './testing.js';
+import { testAutomation, testAbort } from './testing.js';
 import { defineAutomation, abort } from './types/automation.js';
 import type { TriggerEvent } from './types/triggers.js';
 
@@ -13,7 +13,7 @@ const stateChangedEvent: TriggerEvent = {
   correlation_id: 'test-cid',
 };
 
-// ---------- helpers ----------
+// ---------- testAutomation ----------
 
 describe('testAutomation', () => {
   it('returns the Decision from reduce on the happy path', () => {
@@ -27,13 +27,10 @@ describe('testAutomation', () => {
     });
 
     const result = testAutomation(automation, { event: onStartEvent });
-    expect('decision' in result).toBe(true);
-    if (!('abort' in result)) {
-      expect(result.decision).toBe('on');
-    }
+    expect(result.decision).toBe('on');
   });
 
-  it('returns Abort when context aborts', () => {
+  it('throws when context aborts', () => {
     const automation = defineAutomation({
       id: 'test',
       location: 'test',
@@ -43,11 +40,7 @@ describe('testAutomation', () => {
       reduce: () => ({ decision: 'ok', actions: [] }),
     });
 
-    const result = testAutomation(automation, { event: onStartEvent });
-    expect('abort' in result).toBe(true);
-    if ('abort' in result) {
-      expect(result.reason).toBe('not_ready');
-    }
+    expect(() => testAutomation(automation, { event: onStartEvent })).toThrow('automation aborted: not_ready');
   });
 
   it('passes injected state to context', () => {
@@ -65,9 +58,7 @@ describe('testAutomation', () => {
       state: { 'sensor.mode': { state: 'home' } },
     });
 
-    if (!('abort' in result)) {
-      expect(result.decision).toBe('home');
-    }
+    expect(result.decision).toBe('home');
   });
 
   it('returns undefined for entities not in the state map', () => {
@@ -115,9 +106,7 @@ describe('testAutomation', () => {
     });
 
     const result = testAutomation(automation, { event: stateChangedEvent });
-    if (!('abort' in result)) {
-      expect(result.decision).toBe('act');
-    }
+    expect(result.decision).toBe('act');
   });
 
   it('ha context defaults to returning empty arrays', () => {
@@ -139,11 +128,9 @@ describe('testAutomation', () => {
     });
 
     const result = testAutomation(automation, { event: onStartEvent });
-    if (!('abort' in result)) {
-      expect(result.inputs?.lights).toEqual([]);
-      expect(result.inputs?.labels).toEqual([]);
-      expect(result.inputs?.areaEntities).toEqual([]);
-    }
+    expect(result.inputs?.lights).toEqual([]);
+    expect(result.inputs?.labels).toEqual([]);
+    expect(result.inputs?.areaEntities).toEqual([]);
   });
 
   it('accepts custom ha context overrides', () => {
@@ -161,9 +148,7 @@ describe('testAutomation', () => {
       ha: { entitiesByLabel: () => ['light.kitchen', 'light.parlour'] },
     });
 
-    if (!('abort' in result)) {
-      expect(result.inputs?.lights).toEqual(['light.kitchen', 'light.parlour']);
-    }
+    expect(result.inputs?.lights).toEqual(['light.kitchen', 'light.parlour']);
   });
 
   it('fills in default EntityState fields for injected state entries', () => {
@@ -181,11 +166,40 @@ describe('testAutomation', () => {
       state: { 'light.kitchen': { state: 'on', attributes: { brightness: 200 } } },
     });
 
-    if (!('abort' in result)) {
-      const entity = result.inputs?.entity as { entity_id: string; state: string; attributes: Record<string, unknown> };
-      expect(entity.entity_id).toBe('light.kitchen');
-      expect(entity.state).toBe('on');
-      expect(entity.attributes).toEqual({ brightness: 200 });
-    }
+    const entity = result.inputs?.entity as { entity_id: string; state: string; attributes: Record<string, unknown> };
+    expect(entity.entity_id).toBe('light.kitchen');
+    expect(entity.state).toBe('on');
+    expect(entity.attributes).toEqual({ brightness: 200 });
+  });
+});
+
+// ---------- testAbort ----------
+
+describe('testAbort', () => {
+  it('returns Abort when context aborts', () => {
+    const automation = defineAutomation({
+      id: 'test',
+      location: 'test',
+      subsystem: 'test',
+      triggers: [{ type: 'on_start' }],
+      context: () => abort('not_ready'),
+      reduce: () => ({ decision: 'ok', actions: [] }),
+    });
+
+    const result = testAbort(automation, { event: onStartEvent });
+    expect(result.reason).toBe('not_ready');
+  });
+
+  it('throws when automation produces a Decision instead of aborting', () => {
+    const automation = defineAutomation({
+      id: 'test',
+      location: 'test',
+      subsystem: 'test',
+      triggers: [{ type: 'on_start' }],
+      context: () => ({ enabled: true }),
+      reduce: () => ({ decision: 'on', actions: [] }),
+    });
+
+    expect(() => testAbort(automation, { event: onStartEvent })).toThrow('expected abort but got decision: on');
   });
 });

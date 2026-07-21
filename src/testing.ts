@@ -11,10 +11,7 @@ interface TestOptions {
   ha?: Partial<HAContext>;
 }
 
-export function testAutomation<C>(
-  automation: Automation<C>,
-  options: TestOptions,
-): Decision | Abort {
+function run<C>(automation: Automation<C>, options: TestOptions): Decision | Abort {
   const { event, state = {}, ha = {} } = options;
 
   const stateFunc = (entityId: string) => {
@@ -38,4 +35,16 @@ export function testAutomation<C>(
   const ctx = automation.context(stateFunc, haContext, event);
   if (isAbort(ctx)) return ctx;
   return automation.reduce(ctx);
+}
+
+export function testAutomation<C>(automation: Automation<C>, options: TestOptions): Decision {
+  const result = run(automation, options);
+  if (isAbort(result)) throw new Error(`automation aborted: ${result.reason}`);
+  return result;
+}
+
+export function testAbort<C>(automation: Automation<C>, options: TestOptions): Abort {
+  const result = run(automation, options);
+  if (!isAbort(result)) throw new Error(`expected abort but got decision: ${result.decision}`);
+  return result;
 }
