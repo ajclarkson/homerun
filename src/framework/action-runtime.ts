@@ -21,6 +21,14 @@ interface Deps {
   metrics?: MetricsBackend;
 }
 
+function safeStringify(err: object): string {
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
+}
+
 export class ActionRuntime {
   constructor(private readonly deps: Deps) {}
 
@@ -50,7 +58,12 @@ export class ActionRuntime {
       const duration = (performance.now() - start) / 1000;
       this.deps.metrics?.observeHistogram('homerun_action_duration_seconds', duration, labels);
       this.deps.metrics?.incrementCounter('homerun_actions_failed_total', labels);
-      const reason = err instanceof Error ? err.message : String(err);
+      const reason =
+        err instanceof Error
+          ? err.message
+          : typeof err === 'object' && err !== null
+            ? safeStringify(err)
+            : String(err);
       this.deps.eventPublisher.publishActionEvent(
         this.makeEvent(ctx, 'action_result', action, { reason }),
       );
