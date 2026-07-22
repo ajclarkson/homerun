@@ -52,14 +52,17 @@ export function generateFileContent(states: HAStatePayload[]): string {
   const entries = states
     .map((s) => {
       const stateType = inferStateType(s, personStates.get(s.entity_id));
-      return `  '${s.entity_id}': { state: ${stateType} };`;
+      return `    '${s.entity_id}': { state: ${stateType} };`;
     })
     .join('\n');
 
   return `// generated — do not edit — run: npm run generate:ha-types
-interface HAEntities {
+declare global {
+  interface HAEntities {
 ${entries}
+  }
 }
+export {};
 `;
 }
 

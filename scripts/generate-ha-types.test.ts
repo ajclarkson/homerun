@@ -72,21 +72,21 @@ describe('generateFileContent', () => {
 
   it('applies correct types per domain', () => {
     const content = generateFileContent(states);
-    expect(content).toContain("'input_boolean.house_heating_enabled': { state: 'on' | 'off' | 'unavailable' | 'unknown' }");
-    expect(content).toContain("'input_select.house_active_mode_modifier': { state: 'none' | 'guest' | 'unavailable' | 'unknown' }");
-    expect(content).toContain("'sensor.parlour_temperature': { state: string }");
+    expect(content).toContain("    'input_boolean.house_heating_enabled': { state: 'on' | 'off' | 'unavailable' | 'unknown' }");
+    expect(content).toContain("    'input_select.house_active_mode_modifier': { state: 'none' | 'guest' | 'unavailable' | 'unknown' }");
+    expect(content).toContain("    'sensor.parlour_temperature': { state: string }");
   });
 
-  it('declares HAEntities as a global ambient interface (no export)', () => {
+  it('wraps HAEntities in declare global so it merges with the framework declaration', () => {
     const content = generateFileContent(states);
-    expect(content).toContain('interface HAEntities');
+    expect(content).toContain('declare global {');
+    expect(content).toContain('interface HAEntities {');
     expect(content).not.toContain('export interface HAEntities');
     expect(content).not.toContain('export type HAState');
   });
 
-  it('has no top-level import or export so the file is ambient', () => {
+  it('ends with export {} to make the file a module (required for declare global)', () => {
     const content = generateFileContent(states);
-    expect(content).not.toMatch(/^import /m);
-    expect(content).not.toMatch(/^export /m);
+    expect(content).toContain('export {};');
   });
 });
