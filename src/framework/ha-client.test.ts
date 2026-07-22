@@ -11,6 +11,9 @@ const mockConnection = {
   addEventListener: vi.fn((event: string, cb: () => void) => {
     if (event === 'disconnected') capturedDisconnectListener = cb;
   }),
+  subscribeEvents: vi.fn(async (cb: () => void, eventType: string) => {
+    if (eventType === 'entity_registry_updated') capturedRegistryUpdatedCallback = cb;
+  }),
   sendMessagePromise: vi.fn(async () => []),
   close: vi.fn(),
 };
@@ -20,9 +23,6 @@ vi.mock('home-assistant-js-websocket', () => ({
   createConnection: vi.fn(async () => mockConnection),
   subscribeEntities: vi.fn((_conn: unknown, cb: (entities: Record<string, unknown>) => void) => {
     capturedSubscribeCallback = cb;
-  }),
-  subscribeEvents: vi.fn((_conn: unknown, cb: () => void, eventType: string) => {
-    if (eventType === 'entity_registry_updated') capturedRegistryUpdatedCallback = cb;
   }),
 }));
 
@@ -492,12 +492,10 @@ describe('HAClient', () => {
     });
 
     it('subscribes to entity_registry_updated on connect', async () => {
-      const { subscribeEvents } = await import('home-assistant-js-websocket');
       const { client } = await connectClient();
       capturedSubscribeCallback!(snapshot({}));
       await client.ready;
-      expect(subscribeEvents).toHaveBeenCalledWith(
-        expect.anything(),
+      expect(mockConnection.subscribeEvents).toHaveBeenCalledWith(
         expect.any(Function),
         'entity_registry_updated',
       );
