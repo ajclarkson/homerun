@@ -3,6 +3,7 @@ import {
   createConnection,
   createLongLivedTokenAuth,
   subscribeEntities,
+  subscribeEvents,
   type Connection,
   type HassEntities,
   type HassEntity,
@@ -109,6 +110,12 @@ export class HAClient extends EventEmitter {
     });
 
     await this.loadEntityRegistry();
+
+    subscribeEvents(this.connection, () => {
+      this.loadEntityRegistry().catch((err) => {
+        console.error('[ha-client] registry reload failed after entity_registry_updated:', err);
+      });
+    }, 'entity_registry_updated');
 
     let firstSnapshot = true;
 
