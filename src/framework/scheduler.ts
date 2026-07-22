@@ -12,7 +12,27 @@ export class Scheduler {
   ) {}
 
   start(): void {
-    for (const automation of this.automations) {
+    this.registerCronTriggers(this.automations);
+
+    this.ready.then(() => {
+      this.dispatch({ type: 'on_start', correlation_id: crypto.randomUUID() });
+    }).catch((err) => {
+      console.error('[scheduler] ready promise rejected:', err);
+    });
+  }
+
+  sync(automations: Automation<unknown>[]): void {
+    this.stop();
+    this.registerCronTriggers(automations);
+  }
+
+  stop(): void {
+    for (const cleanup of this.cleanups) cleanup();
+    this.cleanups.length = 0;
+  }
+
+  private registerCronTriggers(automations: Automation<unknown>[]): void {
+    for (const automation of automations) {
       for (const trigger of automation.triggers) {
         if (trigger.type === 'schedule') {
           const { cron: expression } = trigger;
@@ -28,16 +48,5 @@ export class Scheduler {
         }
       }
     }
-
-    this.ready.then(() => {
-      this.dispatch({ type: 'on_start', correlation_id: crypto.randomUUID() });
-    }).catch((err) => {
-      console.error('[scheduler] ready promise rejected:', err);
-    });
-  }
-
-  stop(): void {
-    for (const cleanup of this.cleanups) cleanup();
-    this.cleanups.length = 0;
   }
 }

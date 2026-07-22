@@ -91,6 +91,7 @@ startHotReload(automationsDir, registry);
 
 async function reload(): Promise<void> {
   await rescanAutomations(automationsDir, registry);
+  scheduler.sync(registry.getAll());
   const count = registry.getAll().length;
   metricsBackend.setGauge('homerun_automations_loaded', count);
   console.log(`[homerun] rescan complete — ${count} automation(s) registered`);

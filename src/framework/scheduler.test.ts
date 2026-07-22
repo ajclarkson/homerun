@@ -164,6 +164,67 @@ describe('Scheduler', () => {
 
 });
 
+// ---------- sync ----------
+
+describe('Scheduler — sync', () => {
+  beforeEach(() => mockCronSchedule.mockClear());
+
+  it('registers cron jobs for the new automation list', () => {
+    const scheduler = new Scheduler([], vi.fn(), Promise.resolve());
+    scheduler.start();
+
+    const automation = makeAutomation('a', '0 8 * * *');
+    scheduler.sync([automation]);
+
+    expect(mockCronSchedule).toHaveBeenCalledOnce();
+    expect(mockCronSchedule).toHaveBeenCalledWith('0 8 * * *', expect.any(Function));
+  });
+
+  it('cancels existing cron tasks before registering the new list', () => {
+    const mockStop = vi.fn();
+    mockCronSchedule.mockReturnValue({ stop: mockStop });
+
+    const a1 = makeAutomation('a1', '0 8 * * *');
+    const scheduler = new Scheduler([a1], vi.fn(), Promise.resolve());
+    scheduler.start();
+
+    const a2 = makeAutomation('a2', '0 22 * * *');
+    scheduler.sync([a2]);
+
+    expect(mockStop).toHaveBeenCalledTimes(1);
+    expect(mockCronSchedule).toHaveBeenCalledTimes(2);
+    expect(mockCronSchedule).toHaveBeenLastCalledWith('0 22 * * *', expect.any(Function));
+  });
+
+  it('dispatches from newly registered cron jobs after sync', () => {
+    const dispatch = vi.fn<(e: TriggerEvent) => void>();
+    const scheduler = new Scheduler([], dispatch, Promise.resolve());
+    scheduler.start();
+
+    const automation = makeAutomation('a', '0 8 * * *');
+    scheduler.sync([automation]);
+
+    cronCallbackFor()();
+
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'schedule', cron: '0 8 * * *' }));
+  });
+
+  it('does not fire on_start again after sync', async () => {
+    const dispatch = vi.fn<(e: TriggerEvent) => void>();
+    const { ready, resolveReady } = makeReadyPromise();
+    const scheduler = new Scheduler([], dispatch, ready);
+    scheduler.start();
+
+    resolveReady();
+    await Promise.resolve();
+
+    dispatch.mockClear();
+    scheduler.sync([makeAutomation('a', '0 8 * * *')]);
+
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'on_start' }));
+  });
+});
+
 // ---------- on_start ----------
 
 describe('Scheduler — on_start', () => {
