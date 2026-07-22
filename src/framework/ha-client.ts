@@ -114,7 +114,7 @@ export class HAClient extends EventEmitter {
       console.log('[ha-client] entity_registry_updated received — reloading registry');
       this.loadEntityRegistry()
         .then(() => {
-          console.log(`[ha-client] registry reloaded (${this.entityToLabels.size} entities)`);
+          console.log(`[ha-client] registry reloaded (${this.labelToEntities.size} labels, ${this.areaToEntities.size} areas)`);
         })
         .catch((err) => {
           console.error('[ha-client] registry reload failed after entity_registry_updated:', err);
