@@ -84,6 +84,10 @@ export class HAClient extends EventEmitter {
     return this.stateCache.size;
   }
 
+  get registryStats(): { labels: number; areas: number } {
+    return { labels: this.labelToEntities.size, areas: this.areaToEntities.size };
+  }
+
   async callService(
     domain: string,
     service: string,

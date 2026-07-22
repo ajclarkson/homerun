@@ -128,7 +128,8 @@ haClient.on('reconnected', () => {
 await haClient.connect(config.homeassistant.url, config.homeassistant.token);
 await haClient.ready;
 haReady = true;
-console.log(`[homerun] ready — ${haClient.entityCount} entities cached`);
+const { labels, areas } = haClient.registryStats;
+console.log(`[homerun] ready — ${haClient.entityCount} entities cached (${labels} labels, ${areas} areas)`);
 eventPublisher.publishLifecycle('server_started', registry.getAll().length, dryRun);
 
 // 8. Graceful SIGTERM shutdown.
