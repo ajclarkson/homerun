@@ -134,6 +134,43 @@ describe('Scheduler', () => {
     errorSpy.mockRestore();
   });
 
+  it('registers a single cron job for automations sharing the same expression', () => {
+    const a1 = makeAutomation('a1', '*/30 * * * *');
+    const a2 = makeAutomation('a2', '*/30 * * * *');
+    const a3 = makeAutomation('a3', '*/30 * * * *');
+    const scheduler = new Scheduler([a1, a2, a3], vi.fn(), Promise.resolve());
+    scheduler.start();
+
+    expect(mockCronSchedule).toHaveBeenCalledOnce();
+    expect(mockCronSchedule).toHaveBeenCalledWith('*/30 * * * *', expect.any(Function));
+  });
+
+  it('dispatches exactly one schedule event per tick when automations share an expression', () => {
+    const dispatch = vi.fn<(e: TriggerEvent) => void>();
+    const a1 = makeAutomation('a1', '*/30 * * * *');
+    const a2 = makeAutomation('a2', '*/30 * * * *');
+    const scheduler = new Scheduler([a1, a2], dispatch, Promise.resolve());
+    scheduler.start();
+
+    cronCallbackFor()();
+
+    expect(dispatch).toHaveBeenCalledOnce();
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'schedule', cron: '*/30 * * * *' }));
+  });
+
+  it('logs the confirmation once, listing all automation ids sharing an expression', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const a1 = makeAutomation('a1', '*/30 * * * *');
+    const a2 = makeAutomation('a2', '*/30 * * * *');
+    const scheduler = new Scheduler([a1, a2], vi.fn(), Promise.resolve());
+    scheduler.start();
+
+    expect(logSpy).toHaveBeenCalledWith(
+      '[scheduler] registered cron "*/30 * * * *" for a1, a2',
+    );
+    logSpy.mockRestore();
+  });
+
   it('does not register cron jobs for non-schedule triggers', () => {
     const automation: Automation<unknown> = {
       id: 'a',
