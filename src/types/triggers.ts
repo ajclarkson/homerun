@@ -3,12 +3,16 @@ import type { EntityState } from '../framework/ha-client.js';
 // ---------- Trigger declarations ----------
 // Declared on an Automation to describe what events activate it.
 
+// Mirrors the conditional in HAState: accepts only known entity IDs when HAEntities
+// is populated by codegen, falls back to string when it is empty.
+type _HAEntityKey = keyof HAEntities extends never ? string : keyof HAEntities;
+
 export type Trigger =
-  | { type: 'state_changed'; entity: string | RegExp; to?: string | string[]; duration?: number }
+  | { type: 'state_changed'; entity: _HAEntityKey | RegExp; to?: string | string[]; duration?: number }
   | { type: 'schedule'; cron: string }
   | { type: 'on_start' }
   | { type: 'timer_expired'; timerKey: string }
-  | { type: 'button'; entity: string | RegExp; gesture: 'single_press' | 'double_press' | 'hold'; button?: string }
+  | { type: 'button'; entity: _HAEntityKey | RegExp; gesture: 'single_press' | 'double_press' | 'hold'; button?: string }
   | { type: 'mqtt_in'; topic: string };
 
 // ---------- Trigger events ----------
