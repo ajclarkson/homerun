@@ -16,10 +16,15 @@ export class Scheduler {
       for (const trigger of automation.triggers) {
         if (trigger.type === 'schedule') {
           const { cron: expression } = trigger;
-          const task = cron.schedule(expression, () => {
-            this.dispatch({ type: 'schedule', cron: expression, correlation_id: crypto.randomUUID() });
-          });
-          this.cleanups.push(() => task.stop());
+          try {
+            const task = cron.schedule(expression, () => {
+              this.dispatch({ type: 'schedule', cron: expression, correlation_id: crypto.randomUUID() });
+            });
+            this.cleanups.push(() => task.stop());
+            console.log(`[scheduler] registered cron "${expression}" for ${automation.id}`);
+          } catch (err) {
+            console.error(`[scheduler] failed to register cron "${expression}" for ${automation.id}:`, err);
+          }
         }
       }
     }

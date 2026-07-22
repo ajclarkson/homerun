@@ -6,6 +6,10 @@ secrets.yaml
 *.js.map
 .tmuxinator.yml
 
+# Local dev automations sandbox — point AUTOMATIONS_DIR=./automations to use
+automations/*
+!automations/.gitkeep
+
 # Bruno environment files — local.bru is committed as the baseline;
 # personal environments (e.g. with cluster URLs) stay local only.
 bruno/environments/*.bru

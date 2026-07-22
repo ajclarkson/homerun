@@ -108,6 +108,32 @@ describe('Scheduler', () => {
     expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'schedule', cron: '0 8 * * *' }));
   });
 
+  it('logs a confirmation when a cron job is successfully registered', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const automation = makeAutomation('test.my-automation', '0 8 * * *');
+    const scheduler = new Scheduler([automation], vi.fn(), Promise.resolve());
+    scheduler.start();
+
+    expect(logSpy).toHaveBeenCalledWith(
+      '[scheduler] registered cron "0 8 * * *" for test.my-automation',
+    );
+    logSpy.mockRestore();
+  });
+
+  it('logs an error and does not throw when cron.schedule() fails', () => {
+    mockCronSchedule.mockImplementationOnce(() => { throw new Error('invalid expression'); });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const automation = makeAutomation('test.bad-cron', 'not-a-cron');
+    const scheduler = new Scheduler([automation], vi.fn(), Promise.resolve());
+
+    expect(() => scheduler.start()).not.toThrow();
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[scheduler] failed to register cron "not-a-cron" for test.bad-cron:',
+      expect.any(Error),
+    );
+    errorSpy.mockRestore();
+  });
+
   it('does not register cron jobs for non-schedule triggers', () => {
     const automation: Automation<unknown> = {
       id: 'a',
