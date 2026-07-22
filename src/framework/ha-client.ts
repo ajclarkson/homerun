@@ -110,6 +110,19 @@ export class HAClient extends EventEmitter {
 
     await this.loadEntityRegistry();
 
+    this.connection.subscribeEvents(() => {
+      console.log('[ha-client] entity_registry_updated received — reloading registry');
+      this.loadEntityRegistry()
+        .then(() => {
+          console.log(`[ha-client] registry reloaded (${this.entityToLabels.size} entities)`);
+        })
+        .catch((err) => {
+          console.error('[ha-client] registry reload failed after entity_registry_updated:', err);
+        });
+    }, 'entity_registry_updated').catch((err) => {
+      console.error('[ha-client] failed to subscribe to entity_registry_updated:', err);
+    });
+
     let firstSnapshot = true;
 
     subscribeEntities(this.connection, (entities: HassEntities) => {

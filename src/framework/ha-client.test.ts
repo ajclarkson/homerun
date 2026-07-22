@@ -5,10 +5,14 @@ import { HAClient, type StateChangedEvent } from './ha-client.js';
 
 let capturedSubscribeCallback: ((entities: Record<string, unknown>) => void) | null = null;
 let capturedDisconnectListener: (() => void) | null = null;
+let capturedRegistryUpdatedCallback: (() => void) | null = null;
 
 const mockConnection = {
   addEventListener: vi.fn((event: string, cb: () => void) => {
     if (event === 'disconnected') capturedDisconnectListener = cb;
+  }),
+  subscribeEvents: vi.fn(async (cb: () => void, eventType: string) => {
+    if (eventType === 'entity_registry_updated') capturedRegistryUpdatedCallback = cb;
   }),
   sendMessagePromise: vi.fn(async () => []),
   close: vi.fn(),
@@ -69,6 +73,7 @@ describe('HAClient', () => {
   beforeEach(() => {
     capturedSubscribeCallback = null;
     capturedDisconnectListener = null;
+    capturedRegistryUpdatedCallback = null;
     vi.clearAllMocks();
     mockConnection.sendMessagePromise.mockResolvedValue([]);
   });
@@ -437,6 +442,63 @@ describe('HAClient', () => {
 
       expect(client.context.entitiesByArea('old_room')).toEqual([]);
       expect(client.context.entitiesByArea('new_room')).toEqual(['light.a']);
+    });
+  });
+
+  describe('entity_registry_updated live refresh', () => {
+    it('reloads labels when entity_registry_updated fires', async () => {
+      (mockConnection.sendMessagePromise as Mock)
+        .mockResolvedValueOnce([
+          { entity_id: 'light.a', labels: ['old_label'] },
+        ])
+        .mockResolvedValueOnce([
+          { entity_id: 'light.a', labels: ['new_label'] },
+        ]);
+
+      const { client } = await connectClient();
+      capturedSubscribeCallback!(snapshot({ 'light.a': makeEntity('on', 'T1') }));
+      await client.ready;
+
+      expect(client.context.labelsFor('light.a')).toEqual(['old_label']);
+
+      capturedRegistryUpdatedCallback!();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(client.context.labelsFor('light.a')).toEqual(['new_label']);
+      expect(client.context.entitiesByLabel('old_label')).toEqual([]);
+      expect(client.context.entitiesByLabel('new_label')).toEqual(['light.a']);
+    });
+
+    it('reloads area map when entity_registry_updated fires', async () => {
+      (mockConnection.sendMessagePromise as Mock)
+        .mockResolvedValueOnce([
+          { entity_id: 'light.a', area_id: 'old_room' },
+        ])
+        .mockResolvedValueOnce([
+          { entity_id: 'light.a', area_id: 'new_room' },
+        ]);
+
+      const { client } = await connectClient();
+      capturedSubscribeCallback!(snapshot({ 'light.a': makeEntity('on', 'T1') }));
+      await client.ready;
+
+      expect(client.context.entitiesByArea('old_room')).toEqual(['light.a']);
+
+      capturedRegistryUpdatedCallback!();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(client.context.entitiesByArea('old_room')).toEqual([]);
+      expect(client.context.entitiesByArea('new_room')).toEqual(['light.a']);
+    });
+
+    it('subscribes to entity_registry_updated on connect', async () => {
+      const { client } = await connectClient();
+      capturedSubscribeCallback!(snapshot({}));
+      await client.ready;
+      expect(mockConnection.subscribeEvents).toHaveBeenCalledWith(
+        expect.any(Function),
+        'entity_registry_updated',
+      );
     });
   });
 
