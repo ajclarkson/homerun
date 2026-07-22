@@ -4,27 +4,27 @@ import { inferStateType, generateFileContent } from './generate-ha-types.js';
 // ---------- inferStateType ----------
 
 describe('inferStateType', () => {
-  it('binary_sensor produces "on" | "off"', () => {
+  it('binary_sensor produces "on" | "off" | unavailable/unknown', () => {
     expect(inferStateType({ entity_id: 'binary_sensor.parlour_sensor_motion', state: 'off', attributes: {} }))
-      .toBe("'on' | 'off'");
+      .toBe("'on' | 'off' | 'unavailable' | 'unknown'");
   });
 
-  it('input_boolean produces "on" | "off"', () => {
+  it('input_boolean produces "on" | "off" | unavailable/unknown', () => {
     expect(inferStateType({ entity_id: 'input_boolean.house_heating_enabled', state: 'on', attributes: {} }))
-      .toBe("'on' | 'off'");
+      .toBe("'on' | 'off' | 'unavailable' | 'unknown'");
   });
 
-  it('switch produces "on" | "off"', () => {
+  it('switch produces "on" | "off" | unavailable/unknown', () => {
     expect(inferStateType({ entity_id: 'switch.kitchen_plug', state: 'off', attributes: {} }))
-      .toBe("'on' | 'off'");
+      .toBe("'on' | 'off' | 'unavailable' | 'unknown'");
   });
 
-  it('input_select uses union of attributes.options', () => {
+  it('input_select uses union of attributes.options with unavailable/unknown', () => {
     expect(inferStateType({
       entity_id: 'input_select.house_active_mode_modifier',
       state: 'none',
       attributes: { options: ['none', 'guest', 'sitter'] },
-    })).toBe("'none' | 'guest' | 'sitter'");
+    })).toBe("'none' | 'guest' | 'sitter' | 'unavailable' | 'unknown'");
   });
 
   it('input_select falls back to string when options attribute is missing', () => {
@@ -32,9 +32,9 @@ describe('inferStateType', () => {
       .toBe('string');
   });
 
-  it('person produces union of all observed state values', () => {
+  it('person produces string (state is a transient snapshot, not an exhaustive vocabulary)', () => {
     expect(inferStateType({ entity_id: 'person.adam', state: 'home', attributes: {} }, ['home', 'not_home']))
-      .toBe("'home' | 'not_home'");
+      .toBe('string');
   });
 
   it('unknown domain produces string', () => {
@@ -72,8 +72,8 @@ describe('generateFileContent', () => {
 
   it('applies correct types per domain', () => {
     const content = generateFileContent(states);
-    expect(content).toContain("'input_boolean.house_heating_enabled': { state: 'on' | 'off' }");
-    expect(content).toContain("'input_select.house_active_mode_modifier': { state: 'none' | 'guest' }");
+    expect(content).toContain("'input_boolean.house_heating_enabled': { state: 'on' | 'off' | 'unavailable' | 'unknown' }");
+    expect(content).toContain("'input_select.house_active_mode_modifier': { state: 'none' | 'guest' | 'unavailable' | 'unknown' }");
     expect(content).toContain("'sensor.parlour_temperature': { state: string }");
   });
 
