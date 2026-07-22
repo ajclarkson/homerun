@@ -1,6 +1,6 @@
 import type { Automation, Decision, Abort } from './types/automation.js';
 import type { TriggerEvent } from './types/triggers.js';
-import type { HAContext } from './framework/ha-client.js';
+import type { HAContext, HAState } from './framework/ha-client.js';
 import { isAbort } from './types/automation.js';
 
 type TestStateEntry = { state: string; attributes?: Record<string, unknown>; last_changed?: string; last_updated?: string };
@@ -32,7 +32,7 @@ function run<C>(automation: Automation<C>, options: TestOptions): Decision | Abo
     entitiesByArea: ha.entitiesByArea ?? (() => []),
   };
 
-  const ctx = automation.context(stateFunc, haContext, event);
+  const ctx = automation.context(stateFunc as HAState, haContext, event);
   if (isAbort(ctx)) return ctx;
   return automation.reduce(ctx);
 }

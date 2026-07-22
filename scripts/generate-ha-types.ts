@@ -62,14 +62,9 @@ export function generateFileContent(states: HAStatePayload[]): string {
     .join('\n');
 
   return `// generated — do not edit — run: npm run generate:ha-types
-export interface HAEntities {
+interface HAEntities {
 ${entries}
 }
-
-export type HAState = {
-  <E extends keyof HAEntities>(entity: E): HAEntities[E]['state'];
-  <E extends string>(entity: E): string | undefined;
-};
 `;
 }
 

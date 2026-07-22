@@ -77,14 +77,16 @@ describe('generateFileContent', () => {
     expect(content).toContain("'sensor.parlour_temperature': { state: string }");
   });
 
-  it('exports the HAEntities interface and HAState type', () => {
+  it('declares HAEntities as a global ambient interface (no export)', () => {
     const content = generateFileContent(states);
-    expect(content).toContain('export interface HAEntities');
-    expect(content).toContain('export type HAState');
+    expect(content).toContain('interface HAEntities');
+    expect(content).not.toContain('export interface HAEntities');
+    expect(content).not.toContain('export type HAState');
   });
 
-  it('HAState type includes the overloaded entity-keyed signature', () => {
+  it('has no top-level import or export so the file is ambient', () => {
     const content = generateFileContent(states);
-    expect(content).toContain('<E extends keyof HAEntities>');
+    expect(content).not.toMatch(/^import /m);
+    expect(content).not.toMatch(/^export /m);
   });
 });
