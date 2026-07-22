@@ -22,19 +22,14 @@ export function inferStateType(
     case 'binary_sensor':
     case 'input_boolean':
     case 'switch':
-      return "'on' | 'off'";
+      return "'on' | 'off' | 'unavailable' | 'unknown'";
 
     case 'input_select': {
       const options = entity.attributes.options;
       if (Array.isArray(options) && options.length > 0) {
-        return options.map((o: unknown) => `'${o}'`).join(' | ');
+        return options.map((o: unknown) => `'${o}'`).join(' | ') + " | 'unavailable' | 'unknown'";
       }
       return 'string';
-    }
-
-    case 'person': {
-      const states = allObservedStates ?? [entity.state];
-      return [...new Set(states)].map((s) => `'${s}'`).join(' | ');
     }
 
     default:
@@ -62,14 +57,9 @@ export function generateFileContent(states: HAStatePayload[]): string {
     .join('\n');
 
   return `// generated — do not edit — run: npm run generate:ha-types
-export interface HAEntities {
+interface HAEntities {
 ${entries}
 }
-
-export type HAState = {
-  <E extends keyof HAEntities>(entity: E): HAEntities[E]['state'];
-  <E extends string>(entity: E): string | undefined;
-};
 `;
 }
 
