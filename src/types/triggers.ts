@@ -21,10 +21,16 @@ export type Trigger =
 //
 // correlation_id is minted at each event source (HAClient, Scheduler, TimerManager) — not here.
 // parent_correlation_id is set when one pipeline run causally produces another (e.g. via HA feedback loops).
+// root_correlation_id is constant across an entire causal tree (equal to correlation_id at the root) so
+// "everything caused by X" is a single equality filter regardless of chain depth. Optional here so existing
+// hand-built events don't need updating — consumers should fall back to correlation_id when absent.
+// parent_automation_id names the automation whose write produced this event, alongside parent_correlation_id's run.
 
 type TriggerEventBase = {
   correlation_id: string;
   parent_correlation_id?: string;
+  root_correlation_id?: string;
+  parent_automation_id?: string;
 };
 
 export type TriggerEvent = TriggerEventBase & (

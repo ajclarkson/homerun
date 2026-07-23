@@ -75,7 +75,10 @@ describe('Integration — trigger → decision → HA action', () => {
 
     await run(automation, onStart);
 
-    expect(haCallService).toHaveBeenCalledWith('light', 'turn_on', { entity_id: 'light.parlour_light_ceiling' }, { brightness: 200 });
+    expect(haCallService).toHaveBeenCalledWith(
+      'light', 'turn_on', { entity_id: 'light.parlour_light_ceiling' }, { brightness: 200 },
+      { correlationId: 'integ-001', rootCorrelationId: 'integ-001', automationId: 'parlour:lighting' },
+    );
     expect(publishedDecisions).toHaveLength(1);
     expect(publishedDecisions[0]).toMatchObject({ event_type: 'decision', decision: 'lights_on', automation_id: 'parlour:lighting' });
     expect(publishedActions).toHaveLength(2); // action_started + action_result

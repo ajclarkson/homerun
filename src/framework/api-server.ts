@@ -85,7 +85,8 @@ export class ApiServer {
       json(res, 404, { error: `no automation with id "${id}"` });
       return;
     }
-    this.deps.onTrigger(automation, { type: 'on_start', correlation_id: crypto.randomUUID() });
+    const correlation_id = crypto.randomUUID();
+    this.deps.onTrigger(automation, { type: 'on_start', correlation_id, root_correlation_id: correlation_id });
     json(res, 200, { ok: true });
   }
 

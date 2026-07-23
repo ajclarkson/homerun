@@ -10,6 +10,9 @@ export interface ExecutionContext {
   automationId: string;
   location: string;
   subsystem: string;
+  rootCorrelationId?: string;
+  parentCorrelationId?: string;
+  parentAutomationId?: string;
 }
 
 interface Deps {
@@ -46,7 +49,7 @@ export class ActionRuntime {
     const start = performance.now();
     try {
       if (!this.deps.dryRun) {
-        await this.dispatch(action);
+        await this.dispatch(action, ctx);
       }
       const duration = (performance.now() - start) / 1000;
       this.deps.metrics?.observeHistogram('homerun_action_duration_seconds', duration, labels);
@@ -70,10 +73,14 @@ export class ActionRuntime {
     }
   }
 
-  private async dispatch(action: Action): Promise<void> {
+  private async dispatch(action: Action, ctx: ExecutionContext): Promise<void> {
     switch (action.type) {
       case 'ha.call_service':
-        await this.deps.haClient.callService(action.domain, action.service, action.target, action.data);
+        await this.deps.haClient.callService(action.domain, action.service, action.target, action.data, {
+          correlationId: ctx.correlationId,
+          rootCorrelationId: ctx.rootCorrelationId,
+          automationId: ctx.automationId,
+        });
         break;
       case 'mqtt.publish':
         await this.deps.mqttClient.publishAsync(action.topic, action.payload, { retain: action.retain ?? false });
@@ -100,6 +107,7 @@ export class ActionRuntime {
     return {
       schema: 'home.events.v1',
       correlation_id: ctx.correlationId,
+      root_correlation_id: ctx.rootCorrelationId ?? ctx.correlationId,
       automation_id: ctx.automationId,
       location: ctx.location,
       subsystem: ctx.subsystem,
@@ -107,6 +115,8 @@ export class ActionRuntime {
       actions: [action],
       timestamp: new Date().toISOString(),
       ...(this.deps.dryRun ? { dry_run: true } : {}),
+      ...(ctx.parentCorrelationId && { parent_correlation_id: ctx.parentCorrelationId }),
+      ...(ctx.parentAutomationId && { parent_automation_id: ctx.parentAutomationId }),
       ...extra,
     };
   }

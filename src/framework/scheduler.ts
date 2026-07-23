@@ -15,7 +15,8 @@ export class Scheduler {
     this.registerCronTriggers(this.automations);
 
     this.ready.then(() => {
-      this.dispatch({ type: 'on_start', correlation_id: crypto.randomUUID() });
+      const correlation_id = crypto.randomUUID();
+      this.dispatch({ type: 'on_start', correlation_id, root_correlation_id: correlation_id });
     }).catch((err) => {
       console.error('[scheduler] ready promise rejected:', err);
     });
@@ -46,7 +47,8 @@ export class Scheduler {
     for (const [expression, automationIds] of automationIdsByExpression) {
       try {
         const task = cron.schedule(expression, () => {
-          this.dispatch({ type: 'schedule', cron: expression, correlation_id: crypto.randomUUID() });
+          const correlation_id = crypto.randomUUID();
+          this.dispatch({ type: 'schedule', cron: expression, correlation_id, root_correlation_id: correlation_id });
         });
         this.cleanups.push(() => task.stop());
         console.log(`[scheduler] registered cron "${expression}" for ${automationIds.join(', ')}`);

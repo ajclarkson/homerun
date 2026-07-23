@@ -252,6 +252,71 @@ describe('runPipeline — dry-run mode', () => {
   });
 });
 
+// ---------- Correlation propagation ----------
+
+describe('runPipeline — correlation propagation', () => {
+  it('defaults root_correlation_id to correlation_id when the event has none (root event)', async () => {
+    const deps = makeDeps();
+    const ha = makeHAClient();
+    const auto = makeAutomation();
+    await runPipeline(auto, onStartEvent, ha as never, deps as never);
+    const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
+    expect(event.root_correlation_id).toBe('test-cid-pipeline');
+  });
+
+  it('carries root_correlation_id through unchanged when the event is a downstream hop', async () => {
+    const deps = makeDeps();
+    const ha = makeHAClient();
+    const auto = makeAutomation();
+    const hopEvent: TriggerEvent = {
+      type: 'on_start',
+      correlation_id: 'D',
+      root_correlation_id: 'A',
+      parent_correlation_id: 'A',
+      parent_automation_id: 'heat_living_room',
+    };
+    await runPipeline(auto, hopEvent, ha as never, deps as never);
+    const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
+    expect(event.correlation_id).toBe('D');
+    expect(event.root_correlation_id).toBe('A');
+    expect(event.parent_correlation_id).toBe('A');
+    expect(event.parent_automation_id).toBe('heat_living_room');
+  });
+
+  it('two automations reacting to the same root event publish the same root_correlation_id', async () => {
+    const deps = makeDeps();
+    const ha = makeHAClient();
+    const light = makeAutomation({ id: 'living_room:lighting' });
+    const heat = makeAutomation({ id: 'living_room:heating' });
+    await Promise.all([
+      runPipeline(light, onStartEvent, ha as never, deps as never),
+      runPipeline(heat, onStartEvent, ha as never, deps as never),
+    ]);
+    const roots = deps.eventPublisher.publishDecision.mock.calls.map(
+      (c) => (c[0] as Record<string, unknown>).root_correlation_id,
+    );
+    expect(roots).toEqual(['test-cid-pipeline', 'test-cid-pipeline']);
+  });
+
+  it('passes rootCorrelationId, parentCorrelationId, and parentAutomationId to actionRuntime.execute', async () => {
+    const deps = makeDeps();
+    const ha = makeHAClient();
+    const auto = makeAutomation();
+    const hopEvent: TriggerEvent = {
+      type: 'on_start',
+      correlation_id: 'D',
+      root_correlation_id: 'A',
+      parent_correlation_id: 'A',
+      parent_automation_id: 'heat_living_room',
+    };
+    await runPipeline(auto, hopEvent, ha as never, deps as never);
+    const [, ctx] = deps.actionRuntime.execute.mock.calls[0] as [unknown, Record<string, unknown>];
+    expect(ctx.rootCorrelationId).toBe('A');
+    expect(ctx.parentCorrelationId).toBe('A');
+    expect(ctx.parentAutomationId).toBe('heat_living_room');
+  });
+});
+
 // ---------- Metrics ----------
 
 describe('runPipeline — metrics', () => {

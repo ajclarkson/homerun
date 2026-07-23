@@ -25,16 +25,20 @@ export async function runPipeline(
   });
 
   const correlationId = event.correlation_id;
+  const rootCorrelationId = event.root_correlation_id ?? correlationId;
   const timestamp = new Date().toISOString();
 
   const base: Omit<ObsEvent, 'event_type' | 'decision' | 'reason' | 'actions' | 'inputs'> = {
     schema: 'home.events.v1',
     correlation_id: correlationId,
+    root_correlation_id: rootCorrelationId,
     automation_id: automation.id,
     location: automation.location,
     subsystem: automation.subsystem,
     timestamp,
     ...(deps.dryRun ? { dry_run: true } : {}),
+    ...(event.parent_correlation_id && { parent_correlation_id: event.parent_correlation_id }),
+    ...(event.parent_automation_id && { parent_automation_id: event.parent_automation_id }),
   };
 
   // Step 1: Enabled check
@@ -85,6 +89,9 @@ export async function runPipeline(
       automationId: automation.id,
       location: automation.location,
       subsystem: automation.subsystem,
+      rootCorrelationId,
+      ...(event.parent_correlation_id && { parentCorrelationId: event.parent_correlation_id }),
+      ...(event.parent_automation_id && { parentAutomationId: event.parent_automation_id }),
     }),
   ]);
 }
