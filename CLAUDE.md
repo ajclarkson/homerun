@@ -4,7 +4,7 @@
 
 Homerun is a TypeScript framework for Home Assistant automation. It enforces a typed, testable pattern: context builder + pure reducer + declarative actions. Designed to be published as `@ajclarkson/homerun`.
 
-This repository contains the framework only — no automations, no household-specific configuration, no entity names. Those live in a separate private `homerun-automations` repo.
+This repository contains the framework only — no automations, no household-specific configuration, no entity names. Those live in a separate `homerun-automations` repo, which is public — keep that in mind when writing anything there (issues, PRs, commits) too.
 
 ## What this is not
 
@@ -163,7 +163,7 @@ Dry-run events are routed to `homerun/dev/*` so they cannot overwrite retained l
 
 ## Consumer repo
 
-Automations live in a separate private consumer repo. It depends on this package via a local file link (`"homerun": "file:../homerun"`). The `homerun-generate-ha-types` bin is invoked from there as `npm run codegen`.
+Automations live in a separate consumer repo (`homerun-automations`, public). It depends on this package via a local file link (`"homerun": "file:../homerun"`). The `homerun-generate-ha-types` bin is invoked from there as `npm run codegen`.
 
 ## Current state
 
