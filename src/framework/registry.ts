@@ -14,7 +14,8 @@ export class AutomationRegistry {
   }
 
   unregister(id: string): void {
-    this.automations.delete(id);
+    if (!this.automations.delete(id)) return;
+    for (const cb of this.changeCallbacks) cb();
   }
 
   getAll(): Automation<unknown>[] {
