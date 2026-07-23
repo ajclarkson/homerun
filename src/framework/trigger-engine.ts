@@ -141,6 +141,7 @@ export class TriggerEngine {
       if (!this.subscribedTopics.has(topic)) {
         this.mqttClient.subscribe(topic);
         this.subscribedTopics.add(topic);
+        console.log(`[trigger-engine] mqtt subscribed: ${topic}`);
       }
     }
 
@@ -148,6 +149,7 @@ export class TriggerEngine {
       if (!desired.has(topic)) {
         this.mqttClient.unsubscribe(topic);
         this.subscribedTopics.delete(topic);
+        console.log(`[trigger-engine] mqtt unsubscribed: ${topic}`);
       }
     }
   }
