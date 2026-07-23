@@ -39,6 +39,7 @@ function makeMockMqttClient() {
   const subscribed = new Set<string>();
   const client = {
     subscribe: vi.fn((topic: string) => { subscribed.add(topic); }),
+    unsubscribe: vi.fn((topic: string) => { subscribed.delete(topic); }),
     on: (event: string, cb: (...args: unknown[]) => void) => emitter.on(event, cb),
     publish: (topic: string, payload: string) => emitter.emit('message', topic, Buffer.from(payload)),
   } as unknown as MqttClient;
@@ -954,6 +955,79 @@ describe('TriggerEngine', () => {
         const engine = new TriggerEngine(makeRegistry(automation), haClient, onMatch);
         engine.start();
       }).not.toThrow();
+    });
+
+    it('subscribes to a topic registered after start() (hot reload)', () => {
+      const { client: haClient } = makeMockHAClient();
+      const { client: mqttClient, publish, subscribed } = makeMockMqttClient();
+      const onMatch = vi.fn();
+      const registry = makeRegistry();
+
+      const engine = new TriggerEngine(registry, haClient, onMatch, mqttClient);
+      engine.start();
+
+      expect(subscribed.has('home/new')).toBe(false);
+
+      const automation = makeAutomation('a', [{ type: 'mqtt_in', topic: 'home/new' }]);
+      registry.register(automation);
+
+      expect(subscribed.has('home/new')).toBe(true);
+
+      publish('home/new', 'hello');
+
+      expect(onMatch).toHaveBeenCalledWith(
+        automation,
+        expect.objectContaining({ type: 'mqtt_in', topic: 'home/new' }),
+      );
+    });
+
+    it('unsubscribes from a topic no longer used after the owning automation is unregistered', () => {
+      const { client: haClient } = makeMockHAClient();
+      const { client: mqttClient, subscribed } = makeMockMqttClient();
+      const onMatch = vi.fn();
+      const automation = makeAutomation('a', [{ type: 'mqtt_in', topic: 'home/foo' }]);
+      const registry = makeRegistry(automation);
+
+      const engine = new TriggerEngine(registry, haClient, onMatch, mqttClient);
+      engine.start();
+
+      expect(subscribed.has('home/foo')).toBe(true);
+
+      registry.unregister('a');
+
+      expect(subscribed.has('home/foo')).toBe(false);
+    });
+
+    it('keeps a topic subscribed if another automation still declares it after one is unregistered', () => {
+      const { client: haClient } = makeMockHAClient();
+      const { client: mqttClient, subscribed } = makeMockMqttClient();
+      const onMatch = vi.fn();
+      const a1 = makeAutomation('a1', [{ type: 'mqtt_in', topic: 'home/foo' }]);
+      const a2 = makeAutomation('a2', [{ type: 'mqtt_in', topic: 'home/foo' }]);
+      const registry = makeRegistry(a1, a2);
+
+      const engine = new TriggerEngine(registry, haClient, onMatch, mqttClient);
+      engine.start();
+
+      registry.unregister('a1');
+
+      expect(subscribed.has('home/foo')).toBe(true);
+    });
+
+    it('does not attempt to subscribe before start() even if the registry changes', () => {
+      const { client: haClient } = makeMockHAClient();
+      const { client: mqttClient, subscribed } = makeMockMqttClient();
+      const onMatch = vi.fn();
+      const registry = makeRegistry();
+
+      const engine = new TriggerEngine(registry, haClient, onMatch, mqttClient);
+      registry.register(makeAutomation('a', [{ type: 'mqtt_in', topic: 'home/early' }]));
+
+      expect(subscribed.has('home/early')).toBe(false);
+
+      engine.start();
+
+      expect(subscribed.has('home/early')).toBe(true);
     });
   });
 });

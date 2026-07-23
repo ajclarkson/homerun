@@ -107,6 +107,8 @@ export class TriggerEngine {
   private readonly buttonHandlers = new Map<string, ButtonGestureHandler>();
   private regexButtonTriggers: Array<{ pattern: RegExp; gestures: Set<string> }> = [];
   private readonly durationTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly subscribedTopics = new Set<string>();
+  private started = false;
 
   constructor(
     private readonly registry: AutomationRegistry,
@@ -116,7 +118,38 @@ export class TriggerEngine {
     private readonly metrics?: MetricsBackend,
   ) {
     this.rebuildButtonHandlers();
-    registry.onChange(() => this.rebuildButtonHandlers());
+    registry.onChange(() => {
+      this.rebuildButtonHandlers();
+      this.syncMqttSubscriptions();
+    });
+  }
+
+  // Reconciles the set of subscribed mqtt_in topics against the registry's current
+  // automations. Called on start() and again whenever the registry changes (hot
+  // reload / git-sync rescan) so topics added or removed after startup take effect.
+  private syncMqttSubscriptions(): void {
+    if (!this.mqttClient || !this.started) return;
+
+    const desired = new Set<string>();
+    for (const automation of this.registry.getAll()) {
+      for (const trigger of automation.triggers) {
+        if (trigger.type === 'mqtt_in') desired.add(trigger.topic);
+      }
+    }
+
+    for (const topic of desired) {
+      if (!this.subscribedTopics.has(topic)) {
+        this.mqttClient.subscribe(topic);
+        this.subscribedTopics.add(topic);
+      }
+    }
+
+    for (const topic of this.subscribedTopics) {
+      if (!desired.has(topic)) {
+        this.mqttClient.unsubscribe(topic);
+        this.subscribedTopics.delete(topic);
+      }
+    }
   }
 
   private rebuildButtonHandlers(): void {
@@ -187,15 +220,8 @@ export class TriggerEngine {
       });
 
     if (this.mqttClient) {
-      const topics = new Set<string>();
-      for (const automation of this.registry.getAll()) {
-        for (const trigger of automation.triggers) {
-          if (trigger.type === 'mqtt_in') topics.add(trigger.topic);
-        }
-      }
-      for (const topic of topics) {
-        this.mqttClient.subscribe(topic);
-      }
+      this.started = true;
+      this.syncMqttSubscriptions();
       this.mqttClient.subscribe('homerun/trigger/+');
 
       this.mqttClient.on('message', (topic: string, payload: Buffer) => {

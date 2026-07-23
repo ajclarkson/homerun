@@ -93,6 +93,23 @@ describe('AutomationRegistry', () => {
     expect(cb).toHaveBeenCalledOnce();
   });
 
+  it('onChange callback is called when an automation is unregistered', () => {
+    const reg = new AutomationRegistry();
+    reg.register(makeAutomation('a'));
+    const cb = vi.fn();
+    reg.onChange(cb);
+    reg.unregister('a');
+    expect(cb).toHaveBeenCalledOnce();
+  });
+
+  it('onChange callback is not called when unregistering an unknown id', () => {
+    const reg = new AutomationRegistry();
+    const cb = vi.fn();
+    reg.onChange(cb);
+    reg.unregister('does:not:exist');
+    expect(cb).not.toHaveBeenCalled();
+  });
+
   it('multiple onChange callbacks all fire', () => {
     const reg = new AutomationRegistry();
     const cb1 = vi.fn();
