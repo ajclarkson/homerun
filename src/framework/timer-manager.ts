@@ -9,7 +9,8 @@ export class TimerManager {
     this.cancel(timerKey);
     const handle = setTimeout(() => {
       this.timers.delete(timerKey);
-      this.dispatch({ type: 'timer_expired', timerKey, correlation_id: crypto.randomUUID() });
+      const correlation_id = crypto.randomUUID();
+      this.dispatch({ type: 'timer_expired', timerKey, correlation_id, root_correlation_id: correlation_id });
     }, delayMs);
     this.timers.set(timerKey, handle);
   }

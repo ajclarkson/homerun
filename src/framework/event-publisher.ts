@@ -4,6 +4,12 @@ import type { Action } from '../types/actions.js';
 export interface ObsEvent {
   schema: 'home.events.v1';
   correlation_id: string;
+  // Constant across an entire causal tree (equal to correlation_id at the root) — filter on this
+  // to find everything caused by a given trigger regardless of how many HA hops deep it goes.
+  root_correlation_id?: string;
+  // Set when this run was itself triggered by a state_changed produced by another run's HA write.
+  parent_correlation_id?: string;
+  parent_automation_id?: string;
   automation_id: string;
   location: string;
   subsystem: string;

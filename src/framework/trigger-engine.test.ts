@@ -322,6 +322,56 @@ describe('TriggerEngine', () => {
 
       expect(onMatch).not.toHaveBeenCalled();
     });
+
+    it('forwards parent_correlation_id, root_correlation_id, and parent_automation_id from the StateChangedEvent', async () => {
+      const { client, resolveReady, emitStateChanged } = makeMockHAClient();
+      const onMatch = vi.fn();
+      const automation = makeAutomation('a', [{ type: 'state_changed', entity: 'climate.living_room_trv' }]);
+
+      const engine = new TriggerEngine(makeRegistry(automation), client, onMatch);
+      engine.start();
+      resolveReady();
+      await vi.runAllTimersAsync();
+
+      emitStateChanged({
+        entity_id: 'climate.living_room_trv',
+        old_state: undefined,
+        new_state: makeEntityState('heat', 'climate.living_room_trv'),
+        correlation_id: 'D',
+        root_correlation_id: 'A',
+        parent_correlation_id: 'A',
+        parent_automation_id: 'heat_living_room',
+      });
+
+      expect(onMatch).toHaveBeenCalledWith(automation, expect.objectContaining({
+        correlation_id: 'D',
+        root_correlation_id: 'A',
+        parent_correlation_id: 'A',
+        parent_automation_id: 'heat_living_room',
+      }));
+    });
+
+    it('does not add parent/root fields when the StateChangedEvent has none', async () => {
+      const { client, resolveReady, emitStateChanged } = makeMockHAClient();
+      const onMatch = vi.fn();
+      const automation = makeAutomation('a', [{ type: 'state_changed', entity: 'light.kitchen' }]);
+
+      const engine = new TriggerEngine(makeRegistry(automation), client, onMatch);
+      engine.start();
+      resolveReady();
+      await vi.runAllTimersAsync();
+
+      emitStateChanged({
+        entity_id: 'light.kitchen',
+        old_state: undefined,
+        new_state: makeEntityState('on', 'light.kitchen'),
+        correlation_id: 'test-cid',
+      });
+
+      const [, event] = onMatch.mock.calls[0] as [unknown, TriggerEvent];
+      expect(event.parent_correlation_id).toBeUndefined();
+      expect(event.parent_automation_id).toBeUndefined();
+    });
   });
 
   // ---------- on_start ----------
@@ -400,6 +450,21 @@ describe('TriggerEngine', () => {
       vi.advanceTimersByTime(400);
       expect(onMatch).toHaveBeenCalledOnce();
       expect(onMatch).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ gesture: 'single_press' }));
+    });
+
+    it('forwards root_correlation_id from the originating StateChangedEvent onto the button TriggerEvent', async () => {
+      const { onMatch, emitStateChanged } = await setupButtonEngine();
+
+      emitStateChanged({
+        entity_id: 'sensor.button',
+        old_state: undefined,
+        new_state: makeEntityState('short_press', 'sensor.button'),
+        correlation_id: 'D',
+        root_correlation_id: 'A',
+      });
+      vi.advanceTimersByTime(400);
+
+      expect(onMatch).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ root_correlation_id: 'A' }));
     });
 
     it('resolves double press when second short press arrives within 400ms', async () => {

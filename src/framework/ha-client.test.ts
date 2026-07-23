@@ -18,12 +18,15 @@ const mockConnection = {
   close: vi.fn(),
 };
 
+const mockCallService = vi.fn().mockResolvedValue(undefined);
+
 vi.mock('home-assistant-js-websocket', () => ({
   createLongLivedTokenAuth: vi.fn(() => ({})),
   createConnection: vi.fn(async () => mockConnection),
   subscribeEntities: vi.fn((_conn: unknown, cb: (entities: Record<string, unknown>) => void) => {
     capturedSubscribeCallback = cb;
   }),
+  callService: (...args: unknown[]) => mockCallService(...args),
 }));
 
 // ---------- Helpers ----------
@@ -76,6 +79,7 @@ describe('HAClient', () => {
     capturedRegistryUpdatedCallback = null;
     vi.clearAllMocks();
     mockConnection.sendMessagePromise.mockResolvedValue([]);
+    mockCallService.mockResolvedValue(undefined);
   });
 
   describe('initial connection', () => {
@@ -257,6 +261,111 @@ describe('HAClient', () => {
       }));
 
       expect(client.state('sensor.temp')?.state).toBe('21');
+    });
+  });
+
+  describe('write-side correlation tagging', () => {
+    it('stamps parent_correlation_id and parent_automation_id on a state_changed caused by a registered write', async () => {
+      const { client } = await connectAndInitialise({
+        'sensor.living_room_active_heating': makeEntity('off', 'T1'),
+      });
+
+      await client.callService('climate', 'set_temperature', { entity_id: 'sensor.living_room_active_heating' }, undefined, {
+        correlationId: 'A',
+        rootCorrelationId: 'A',
+        automationId: 'heat_living_room',
+      });
+
+      const changes: StateChangedEvent[] = [];
+      client.on('state_changed', (e) => changes.push(e));
+
+      capturedSubscribeCallback!(snapshot({
+        'sensor.living_room_active_heating': makeEntity('on', 'T2'),
+      }));
+
+      expect(changes[0].parent_correlation_id).toBe('A');
+      expect(changes[0].parent_automation_id).toBe('heat_living_room');
+      expect(changes[0].root_correlation_id).toBe('A');
+    });
+
+    it('does not stamp parent fields on a state_changed with no matching pending write', async () => {
+      const { client } = await connectAndInitialise({
+        'binary_sensor.living_room': makeEntity('off', 'T1'),
+      });
+
+      const changes: StateChangedEvent[] = [];
+      client.on('state_changed', (e) => changes.push(e));
+
+      capturedSubscribeCallback!(snapshot({
+        'binary_sensor.living_room': makeEntity('on', 'T2'),
+      }));
+
+      expect(changes[0].parent_correlation_id).toBeUndefined();
+      expect(changes[0].parent_automation_id).toBeUndefined();
+    });
+
+    it('consumes the pending write on match — a second state_changed for the same entity is not tagged', async () => {
+      const { client } = await connectAndInitialise({
+        'sensor.x': makeEntity('off', 'T1'),
+      });
+
+      await client.callService('climate', 'set_temperature', { entity_id: 'sensor.x' }, undefined, {
+        correlationId: 'A',
+        rootCorrelationId: 'A',
+        automationId: 'heat_living_room',
+      });
+
+      const changes: StateChangedEvent[] = [];
+      client.on('state_changed', (e) => changes.push(e));
+
+      capturedSubscribeCallback!(snapshot({ 'sensor.x': makeEntity('on', 'T2') }));
+      capturedSubscribeCallback!(snapshot({ 'sensor.x': makeEntity('off', 'T3') }));
+
+      expect(changes[0].parent_correlation_id).toBe('A');
+      expect(changes[1].parent_correlation_id).toBeUndefined();
+    });
+
+    it('does not stamp a state_changed after the 2s TTL expires with no match', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        const { client } = await connectAndInitialise({
+          'sensor.x': makeEntity('off', 'T1'),
+        });
+
+        await client.callService('climate', 'set_temperature', { entity_id: 'sensor.x' }, undefined, {
+          correlationId: 'A',
+          rootCorrelationId: 'A',
+          automationId: 'heat_living_room',
+        });
+
+        vi.advanceTimersByTime(2001);
+
+        const changes: StateChangedEvent[] = [];
+        client.on('state_changed', (e) => changes.push(e));
+        capturedSubscribeCallback!(snapshot({ 'sensor.x': makeEntity('on', 'T2') }));
+
+        expect(changes[0].parent_correlation_id).toBeUndefined();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('registers nothing when callService has no target entity_id', async () => {
+      const { client } = await connectAndInitialise({
+        'sensor.x': makeEntity('off', 'T1'),
+      });
+
+      await client.callService('climate', 'set_temperature', undefined, undefined, {
+        correlationId: 'A',
+        rootCorrelationId: 'A',
+        automationId: 'heat_living_room',
+      });
+
+      const changes: StateChangedEvent[] = [];
+      client.on('state_changed', (e) => changes.push(e));
+      capturedSubscribeCallback!(snapshot({ 'sensor.x': makeEntity('on', 'T2') }));
+
+      expect(changes[0].parent_correlation_id).toBeUndefined();
     });
   });
 

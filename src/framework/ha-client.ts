@@ -43,7 +43,20 @@ export interface StateChangedEvent {
   old_state: EntityState | undefined;
   new_state: EntityState;
   correlation_id: string;
+  parent_correlation_id?: string;
+  root_correlation_id?: string;
+  parent_automation_id?: string;
 }
+
+// Identifies the pipeline run that performed a write, so a resulting state_changed
+// (bridged through HA) can be tagged with what caused it. See #28.
+export interface WriteOrigin {
+  correlationId: string;
+  rootCorrelationId?: string;
+  automationId: string;
+}
+
+const PENDING_WRITE_TTL_MS = 2000;
 
 // ---------- Internal types ----------
 
@@ -69,6 +82,10 @@ export class HAClient extends EventEmitter {
   private readonly labelToEntities = new Map<string, Set<string>>();
   private readonly entityToLabels = new Map<string, string[]>();
   private readonly areaToEntities = new Map<string, Set<string>>();
+
+  // entity_id -> origin of the write that's expected to produce a state_changed for it.
+  // Self-evicts after PENDING_WRITE_TTL_MS; consumed (deleted) the moment it's matched.
+  private readonly pendingWrites = new Map<string, WriteOrigin>();
 
   private connection: Connection | null = null;
 
@@ -103,8 +120,14 @@ export class HAClient extends EventEmitter {
     service: string,
     target?: HassServiceTarget,
     data?: Record<string, unknown>,
+    origin?: WriteOrigin,
   ): Promise<void> {
     if (!this.connection) throw new Error('HAClient not connected');
+    const entityId = (target as { entity_id?: string } | undefined)?.entity_id;
+    if (origin && entityId) {
+      this.pendingWrites.set(entityId, origin);
+      setTimeout(() => this.pendingWrites.delete(entityId), PENDING_WRITE_TTL_MS);
+    }
     await callService(this.connection, domain, service, data, target);
   }
 
@@ -176,7 +199,17 @@ export class HAClient extends EventEmitter {
       // last_updated changes whenever state or attributes change in HA.
       if (!old_state || old_state.last_updated !== new_state.last_updated) {
         this.stateCache.set(id, new_state);
-        this.emit('state_changed', { entity_id: id, old_state, new_state, correlation_id: crypto.randomUUID() });
+        const correlation_id = crypto.randomUUID();
+        const origin = this.pendingWrites.get(id);
+        if (origin) this.pendingWrites.delete(id);
+        this.emit('state_changed', {
+          entity_id: id,
+          old_state,
+          new_state,
+          correlation_id,
+          root_correlation_id: origin ? (origin.rootCorrelationId ?? origin.correlationId) : correlation_id,
+          ...(origin && { parent_correlation_id: origin.correlationId, parent_automation_id: origin.automationId }),
+        });
       }
     }
 

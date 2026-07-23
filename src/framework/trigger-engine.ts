@@ -7,6 +7,16 @@ import type { MetricsBackend } from './metrics.js';
 
 const DOUBLE_PRESS_WINDOW_MS = 250;
 
+// Correlation fields threaded from the originating StateChangedEvent onto every
+// TriggerEvent the engine dispatches, so a downstream automation can trace back
+// to what caused it. See #28.
+interface CorrelationFields {
+  correlation_id: string;
+  parent_correlation_id?: string;
+  root_correlation_id?: string;
+  parent_automation_id?: string;
+}
+
 // ---------- Button gesture handler ----------
 
 type GestureState = 'idle' | 'resolving';
@@ -25,7 +35,7 @@ class ButtonGestureHandler {
     private readonly supportsDoublePress: boolean,
   ) {}
 
-  handle(actionState: string, correlationId: string): void {
+  handle(actionState: string, corr: CorrelationFields): void {
     if (actionState === '') return;
 
     const parsed = parseButtonAction(actionState);
@@ -43,7 +53,7 @@ class ButtonGestureHandler {
       }
       if (!this.holdFired) {
         this.holdFired = true;
-        this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'hold', button, correlation_id: correlationId });
+        this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'hold', button, ...corr });
       }
       return;
     }
@@ -64,13 +74,13 @@ class ButtonGestureHandler {
 
     if (this.gestureState === 'idle') {
       if (!this.supportsDoublePress) {
-        this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'single_press', button, correlation_id: correlationId });
+        this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'single_press', button, ...corr });
       } else {
         this.gestureState = 'resolving';
         this.resolveTimer = setTimeout(() => {
           this.resolveTimer = null;
           this.gestureState = 'idle';
-          this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'single_press', button, correlation_id: correlationId });
+          this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'single_press', button, ...corr });
         }, DOUBLE_PRESS_WINDOW_MS);
       }
     } else {
@@ -78,7 +88,7 @@ class ButtonGestureHandler {
       clearTimeout(this.resolveTimer!);
       this.resolveTimer = null;
       this.gestureState = 'idle';
-      this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'double_press', button, correlation_id: correlationId });
+      this.dispatch({ type: 'button', entity_id: this.entityId, gesture: 'double_press', button, ...corr });
     }
   }
 }
@@ -191,6 +201,12 @@ export class TriggerEngine {
       .then(() => {
         this.haClient.on('state_changed', (event: StateChangedEvent) => {
           this.metrics?.incrementCounter('homerun_ha_events_received_total', { event_type: 'state_changed' });
+          const corr: CorrelationFields = {
+            correlation_id: event.correlation_id,
+            ...(event.parent_correlation_id && { parent_correlation_id: event.parent_correlation_id }),
+            ...(event.root_correlation_id && { root_correlation_id: event.root_correlation_id }),
+            ...(event.parent_automation_id && { parent_automation_id: event.parent_automation_id }),
+          };
           let handler = this.buttonHandlers.get(event.entity_id);
           if (!handler) {
             const matchingGestures = new Set<string>();
@@ -205,14 +221,14 @@ export class TriggerEngine {
             }
           }
           if (handler) {
-            handler.handle(event.new_state.state, event.correlation_id);
+            handler.handle(event.new_state.state, corr);
           } else {
             this.dispatch({
               type: 'state_changed',
               entity_id: event.entity_id,
               old_state: event.old_state,
               new_state: event.new_state,
-              correlation_id: event.correlation_id,
+              ...corr,
             });
           }
         });
@@ -234,14 +250,17 @@ export class TriggerEngine {
             console.warn(`[trigger-engine] manual trigger: no automation with id "${automationId}"`);
             return;
           }
-          this.onMatch(automation, { type: 'on_start', correlation_id: crypto.randomUUID() });
+          const correlation_id = crypto.randomUUID();
+          this.onMatch(automation, { type: 'on_start', correlation_id, root_correlation_id: correlation_id });
           return;
         }
+        const correlation_id = `mqtt-${Date.now()}`;
         this.dispatch({
           type: 'mqtt_in',
           topic,
           payload: payload.toString(),
-          correlation_id: `mqtt-${Date.now()}`,
+          correlation_id,
+          root_correlation_id: correlation_id,
         });
       });
     }

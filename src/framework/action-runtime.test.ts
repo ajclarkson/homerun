@@ -35,7 +35,20 @@ describe('ActionRuntime — ha.call_service', () => {
     const rt = new ActionRuntime(deps as never);
     const action: Action = { type: 'ha.call_service', domain: 'light', service: 'turn_on', target: { entity_id: 'light.parlour_light_ceiling' }, data: { brightness: 255 } };
     await rt.execute([action], makeCtx());
-    expect(deps.haClient.callService).toHaveBeenCalledWith('light', 'turn_on', { entity_id: 'light.parlour_light_ceiling' }, { brightness: 255 });
+    expect(deps.haClient.callService).toHaveBeenCalledWith(
+      'light', 'turn_on', { entity_id: 'light.parlour_light_ceiling' }, { brightness: 255 },
+      { correlationId: 'test-corr-id', rootCorrelationId: undefined, automationId: 'parlour:lighting' },
+    );
+  });
+
+  it('passes rootCorrelationId to haClient.callService as the write origin', async () => {
+    const rt = new ActionRuntime(deps as never);
+    const action: Action = { type: 'ha.call_service', domain: 'climate', service: 'set_temperature', target: { entity_id: 'sensor.living_room_active_heating' } };
+    await rt.execute([action], makeCtx({ rootCorrelationId: 'A' }));
+    expect(deps.haClient.callService).toHaveBeenCalledWith(
+      'climate', 'set_temperature', { entity_id: 'sensor.living_room_active_heating' }, undefined,
+      { correlationId: 'test-corr-id', rootCorrelationId: 'A', automationId: 'parlour:lighting' },
+    );
   });
 
   it('emits action_started before and action_result after', async () => {
@@ -230,6 +243,27 @@ describe('ActionRuntime — event publisher fields', () => {
       automation_id: 'bedroom:heating',
       location: 'bedroom',
       subsystem: 'heating',
+    });
+  });
+
+  it('defaults root_correlation_id to correlation_id when ctx has none', async () => {
+    const deps = makeDeps();
+    const rt = new ActionRuntime(deps as never);
+    await rt.execute([{ type: 'ha.call_service', domain: 'light', service: 'turn_on' }], makeCtx({ correlationId: 'cid-99' }));
+    const started = deps.eventPublisher.publishActionEvent.mock.calls[0][0] as Record<string, unknown>;
+    expect(started.root_correlation_id).toBe('cid-99');
+  });
+
+  it('includes root_correlation_id, parent_correlation_id, and parent_automation_id when set on ctx', async () => {
+    const deps = makeDeps();
+    const rt = new ActionRuntime(deps as never);
+    const ctx = makeCtx({ rootCorrelationId: 'A', parentCorrelationId: 'A', parentAutomationId: 'heat_living_room' });
+    await rt.execute([{ type: 'ha.call_service', domain: 'climate', service: 'set_temperature' }], ctx);
+    const started = deps.eventPublisher.publishActionEvent.mock.calls[0][0] as Record<string, unknown>;
+    expect(started).toMatchObject({
+      root_correlation_id: 'A',
+      parent_correlation_id: 'A',
+      parent_automation_id: 'heat_living_room',
     });
   });
 });
