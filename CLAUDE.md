@@ -72,12 +72,18 @@ type Trigger =
 type Action =
   | { type: 'ha.call_service'; domain: string; service: string;
       target?: { entity_id: string }; data?: Record<string, unknown> }
-  | { type: 'mqtt.publish'; topic: string; payload: string; retain?: boolean }
+  | { type: 'mqtt.publish'; topic: string; payload: string; retain?: boolean; impliesEntity?: string }
   | { type: 'timer.start'; timerKey: string; delayMs: number }
   | { type: 'timer.cancel'; timerKey: string };
 ```
 
 Unknown action types must log a warning and emit an error observability event — never silently dropped.
+
+### `mqtt.publish` and `impliesEntity`
+
+`sensor`/`binary_sensor` domains in HA have no service call to set their state — publishing to a manually-configured MQTT entity's `state_topic` is the correct (and only) way to drive them. Set `impliesEntity` to that entity's ID whenever `topic` is one of these `state_topic`s. This lets the HA Client link the `state_changed` HA emits in response back to this automation's run (`parent_correlation_id`/`parent_automation_id` on the resulting observability events), the same way `ha.call_service` gets that link automatically via `target.entity_id`.
+
+There's no way for the framework to detect a missing `impliesEntity` — a topic string carries no information about which HA entity, if any, mirrors it, and that mapping lives entirely in HA's own (often manual) MQTT config. Leaving it unset doesn't break anything; it just means the resulting `state_changed`, and anything that reacts to it, won't be traceable back to this automation's run.
 
 ## HAContext
 

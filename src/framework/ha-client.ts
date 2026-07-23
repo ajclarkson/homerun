@@ -124,11 +124,18 @@ export class HAClient extends EventEmitter {
   ): Promise<void> {
     if (!this.connection) throw new Error('HAClient not connected');
     const entityId = (target as { entity_id?: string } | undefined)?.entity_id;
-    if (origin && entityId) {
-      this.pendingWrites.set(entityId, origin);
-      setTimeout(() => this.pendingWrites.delete(entityId), PENDING_WRITE_TTL_MS);
-    }
+    if (origin && entityId) this.registerPendingWrite(entityId, origin);
     await callService(this.connection, domain, service, data, target);
+  }
+
+  // Registers that `origin` is expected to produce a state_changed for `entityId` — consumed
+  // (and stamped as parent_correlation_id/parent_automation_id) by diffAndUpdate on match, or
+  // self-evicted after PENDING_WRITE_TTL_MS if nothing arrives. Used by ha.call_service writes
+  // (automatically, via target.entity_id) and by mqtt.publish writes that declare `impliesEntity`
+  // (explicitly, since a topic alone carries no entity information — see #28, #138).
+  registerPendingWrite(entityId: string, origin: WriteOrigin): void {
+    this.pendingWrites.set(entityId, origin);
+    setTimeout(() => this.pendingWrites.delete(entityId), PENDING_WRITE_TTL_MS);
   }
 
   disconnect(): void {

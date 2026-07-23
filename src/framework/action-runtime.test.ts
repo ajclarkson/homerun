@@ -6,7 +6,7 @@ import type { Action } from '../types/actions.js';
 // ---------- Mocks ----------
 
 function makeDeps(dryRun = false) {
-  const haClient = { callService: vi.fn().mockResolvedValue(undefined) };
+  const haClient = { callService: vi.fn().mockResolvedValue(undefined), registerPendingWrite: vi.fn() };
   const mqttClient = { publishAsync: vi.fn().mockResolvedValue(undefined) };
   const timerManager = { start: vi.fn(), cancel: vi.fn() };
   const eventPublisher = { publishActionEvent: vi.fn() };
@@ -99,6 +99,23 @@ describe('ActionRuntime — mqtt.publish', () => {
     await rt.execute([{ type: 'mqtt.publish', topic: 'home/test', payload: 'hello' }], makeCtx());
     expect(deps.mqttClient.publishAsync).toHaveBeenCalledWith('home/test', 'hello', { retain: false });
   });
+
+  it('registers a pending write when impliesEntity is set', async () => {
+    const rt = new ActionRuntime(deps as never);
+    const ctx = makeCtx({ correlationId: 'cid-1', rootCorrelationId: 'A', automationId: 'bedroom:occupancy' });
+    await rt.execute([{ type: 'mqtt.publish', topic: 'bedroom/occupied/state', payload: 'ON', retain: true, impliesEntity: 'binary_sensor.bedroom_occupied' }], ctx);
+    expect(deps.haClient.registerPendingWrite).toHaveBeenCalledWith('binary_sensor.bedroom_occupied', {
+      correlationId: 'cid-1',
+      rootCorrelationId: 'A',
+      automationId: 'bedroom:occupancy',
+    });
+  });
+
+  it('does not register a pending write when impliesEntity is absent', async () => {
+    const rt = new ActionRuntime(deps as never);
+    await rt.execute([{ type: 'mqtt.publish', topic: 'bedroom/occupied/state', payload: 'ON' }], makeCtx());
+    expect(deps.haClient.registerPendingWrite).not.toHaveBeenCalled();
+  });
 });
 
 // ---------- timer.start / timer.cancel ----------
@@ -151,6 +168,12 @@ describe('ActionRuntime — dry-run mode', () => {
     const rt = new ActionRuntime(deps as never);
     await rt.execute([{ type: 'mqtt.publish', topic: 'home/test', payload: 'x' }], makeCtx());
     expect(deps.mqttClient.publishAsync).not.toHaveBeenCalled();
+  });
+
+  it('does not register a pending write for mqtt.publish with impliesEntity', async () => {
+    const rt = new ActionRuntime(deps as never);
+    await rt.execute([{ type: 'mqtt.publish', topic: 'home/test', payload: 'x', impliesEntity: 'binary_sensor.x' }], makeCtx());
+    expect(deps.haClient.registerPendingWrite).not.toHaveBeenCalled();
   });
 
   it('does not call timerManager.start or cancel', async () => {

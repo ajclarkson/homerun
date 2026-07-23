@@ -367,6 +367,29 @@ describe('HAClient', () => {
 
       expect(changes[0].parent_correlation_id).toBeUndefined();
     });
+
+    it('registerPendingWrite stamps a state_changed for an mqtt-driven entity (#138)', async () => {
+      const { client } = await connectAndInitialise({
+        'binary_sensor.bedroom_occupied': makeEntity('off', 'T1'),
+      });
+
+      client.registerPendingWrite('binary_sensor.bedroom_occupied', {
+        correlationId: 'A',
+        rootCorrelationId: 'A',
+        automationId: 'bedroom:occupancy',
+      });
+
+      const changes: StateChangedEvent[] = [];
+      client.on('state_changed', (e) => changes.push(e));
+
+      capturedSubscribeCallback!(snapshot({
+        'binary_sensor.bedroom_occupied': makeEntity('on', 'T2'),
+      }));
+
+      expect(changes[0].parent_correlation_id).toBe('A');
+      expect(changes[0].parent_automation_id).toBe('bedroom:occupancy');
+      expect(changes[0].root_correlation_id).toBe('A');
+    });
   });
 
   describe('reconnect', () => {
