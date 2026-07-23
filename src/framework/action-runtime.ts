@@ -83,6 +83,13 @@ export class ActionRuntime {
         });
         break;
       case 'mqtt.publish':
+        if (action.impliesEntity) {
+          this.deps.haClient.registerPendingWrite(action.impliesEntity, {
+            correlationId: ctx.correlationId,
+            rootCorrelationId: ctx.rootCorrelationId,
+            automationId: ctx.automationId,
+          });
+        }
         await this.deps.mqttClient.publishAsync(action.topic, action.payload, { retain: action.retain ?? false });
         break;
       case 'timer.start':
