@@ -37,9 +37,13 @@ export type ObsEvent = ObsEventBase & (
       event_type: 'abort';
       trigger: TriggerSummary;
       // 'disabled'/'unhandled_error' are framework-owned sentinels; 'guard' covers every
-      // author-triggered abort() call. See #142 for a possible future finer-grained split.
-      abort_kind: 'disabled' | 'unhandled_error' | 'guard';
+      // author-triggered abort() call; 'unavailable_input' is a required entity being missing,
+      // via requireState()/requireNumericState() (#142) — distinct from 'guard' since it's a
+      // structurally detectable condition, not arbitrary author logic.
+      abort_kind: 'disabled' | 'unhandled_error' | 'guard' | 'unavailable_input';
       reason?: string;
+      // Set only when abort_kind is 'unavailable_input' — the entity that was missing/invalid.
+      entity?: string;
     }
   | { event_type: 'action_started'; action: Action }
   | { event_type: 'action_result'; action: Action; status: 'ok' | 'error'; error?: string }

@@ -104,8 +104,24 @@ interface Decision {
 Every pipeline run publishes an `ObsEvent` (`schema: 'home.events.v2'`) to `homerun/events`, and — for `decision`/`abort` only — a retained snapshot to `homerun/{location}/{subsystem}/decision`. It's a discriminated union on `event_type`, not one flat shape:
 
 - `decision` — carries `trigger` (a trimmed summary of the real trigger — `{ type, entity_id?, to?, from?, cron?, ... }` depending on trigger type), `decision`/`reason`/`conditions` from the reducer, `actions`, and `hasAction: boolean` (framework-computed from `actions.length > 0` — filter on this, not on parsing `decision` strings, to find every decision that resulted in at least one action).
-- `abort` — carries `trigger` and `abort_kind: 'disabled' | 'unhandled_error' | 'guard'` (`'guard'` covers every author-triggered `abort()` call; `reason` on top of that is whatever string `abort()` was given).
+- `abort` — carries `trigger` and `abort_kind: 'disabled' | 'unhandled_error' | 'guard' | 'unavailable_input'` (`'guard'` covers every author-triggered `abort()` call; `'unavailable_input'` is `requireState()`/`requireNumericState()` detecting a missing entity, with `entity` set to which one; `reason` on top of that is whatever string `abort()` was given, when applicable).
 - `action_started` / `action_result` — one pair per action in the plan, each carrying the single `action` it's about (not an array — always exactly one). `action_result` carries `status: 'ok' | 'error'` and, on failure, `error` with the detail. Emitted as two separate wire events deliberately: a `action_started` with no matching `action_result` is itself a signal (a hung HA call, a crash mid-action).
+
+### `requireState()` and `requireNumericState()`
+
+The dominant `abort()` pattern across real automations (~70% of call sites, per an audit) is a required entity's state being missing or invalid — `const x = state(id)?.state; if (x === undefined) return abort(...)`, repeated at every such check. `requireState(state, entityId)`/`requireNumericState(state, entityId)` collapse that to one line each:
+
+```typescript
+context: (state) => {
+  const houseMode = requireState(state, 'sensor.house_active_mode');
+  const luxThreshold = requireNumericState(state, `input_number.${location}_automation_lux_threshold_dark`);
+  // ... no per-call guard needed — throws UnavailableInputError on failure
+}
+```
+
+They throw `UnavailableInputError` rather than returning `Abort` — `pipeline.ts` already wraps `context()` in try/catch, and this lets call sites skip the `if (isAbort(...)) return ...` boilerplate entirely. Caught specially and classified as `abort_kind: 'unavailable_input'` with `entity` set to the entity ID, distinct from a genuine bug (`'unhandled_error'`). `requireNumericState` additionally checks `Number.isFinite` after `parseFloat`, matching the other half of the audited pattern (numeric threshold/sensor checks).
+
+Fails fast on the first missing entity, matching how every existing `abort()` call site already behaves — it does not collect every missing entity in one context() call before aborting.
 
 ## HAContext
 

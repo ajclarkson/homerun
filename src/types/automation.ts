@@ -26,6 +26,35 @@ export function isAbort(value: unknown): value is Abort {
   return typeof value === 'object' && value !== null && (value as Abort).abort === true;
 }
 
+// ---------- Required state ----------
+// Covers the dominant abort() pattern found across real automations (~70% of call sites,
+// per #142's audit): a required entity's state is missing or invalid, so context() can't
+// proceed. Thrown, not returned — pipeline.ts already wraps context() in try/catch, so this
+// collapses `const x = state(id)?.state; if (x === undefined) return abort(...)` at every call
+// site down to one line, with no per-call guard needed. Caught specially in pipeline.ts and
+// classified as abort_kind: 'unavailable_input' with the entity name, distinct from a genuine
+// bug (abort_kind: 'unhandled_error').
+
+export class UnavailableInputError extends Error {
+  constructor(public readonly entityId: string) {
+    super(`required entity unavailable: ${entityId}`);
+    this.name = 'UnavailableInputError';
+  }
+}
+
+export function requireState(state: HAState, entityId: Parameters<HAState>[0]): string {
+  const value = state(entityId)?.state;
+  if (value === undefined) throw new UnavailableInputError(String(entityId));
+  return value;
+}
+
+export function requireNumericState(state: HAState, entityId: Parameters<HAState>[0]): number {
+  const raw = requireState(state, entityId);
+  const parsed = parseFloat(raw);
+  if (!Number.isFinite(parsed)) throw new UnavailableInputError(String(entityId));
+  return parsed;
+}
+
 // ---------- Automation ----------
 
 export interface Automation<C> {

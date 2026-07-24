@@ -1,5 +1,17 @@
 import { describe, it, expect, expectTypeOf } from 'vitest';
-import { defineAutomation, abort, isAbort, type Automation, type Decision, type Abort } from './automation.js';
+import {
+  defineAutomation, abort, isAbort, requireState, requireNumericState, UnavailableInputError,
+  type Automation, type Decision, type Abort,
+} from './automation.js';
+import type { HAState, EntityState } from '../framework/ha-client.js';
+
+function makeState(values: Record<string, Partial<EntityState> & { state: string }>): HAState {
+  return ((entity: string) => {
+    const v = values[entity];
+    if (!v) return undefined;
+    return { entity_id: entity, attributes: {}, last_changed: '', last_updated: '', ...v };
+  }) as HAState;
+}
 
 describe('defineAutomation', () => {
   it('returns the automation unchanged', () => {
@@ -74,5 +86,41 @@ describe('isAbort', () => {
     expect(isAbort(null)).toBe(false);
     expect(isAbort(undefined)).toBe(false);
     expect(isAbort('abort')).toBe(false);
+  });
+});
+
+describe('requireState', () => {
+  it('returns the entity state string when present', () => {
+    const state = makeState({ 'sensor.house_active_mode': { state: 'normal' } });
+    expect(requireState(state, 'sensor.house_active_mode')).toBe('normal');
+  });
+
+  it('throws UnavailableInputError with the entity id when missing', () => {
+    const state = makeState({});
+    expect(() => requireState(state, 'sensor.house_active_mode')).toThrow(UnavailableInputError);
+    try {
+      requireState(state, 'sensor.house_active_mode');
+      expect.fail('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(UnavailableInputError);
+      expect((err as UnavailableInputError).entityId).toBe('sensor.house_active_mode');
+    }
+  });
+});
+
+describe('requireNumericState', () => {
+  it('returns the parsed number when the state is a valid number', () => {
+    const state = makeState({ 'input_number.lux_threshold': { state: '15.5' } });
+    expect(requireNumericState(state, 'input_number.lux_threshold')).toBe(15.5);
+  });
+
+  it('throws UnavailableInputError when the entity is missing', () => {
+    const state = makeState({});
+    expect(() => requireNumericState(state, 'input_number.lux_threshold')).toThrow(UnavailableInputError);
+  });
+
+  it('throws UnavailableInputError when the state is not a finite number', () => {
+    const state = makeState({ 'input_number.lux_threshold': { state: 'unavailable' } });
+    expect(() => requireNumericState(state, 'input_number.lux_threshold')).toThrow(UnavailableInputError);
   });
 });
