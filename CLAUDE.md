@@ -204,6 +204,8 @@ The framework has two independent observability outputs, each the source of trut
 
 The `/events` SSE endpoint (`ApiServer`) is fed by `EventPublisher.subscribe()`, an in-process listener list — separate from the MQTT `publish()` calls. Anything hooking into `ObsEvent`s in-process (SSE today; a future persistent store for a UI) should use `subscribe()`, not consume the MQTT stream — this keeps it working independently of whether MQTT publishing for `ObsEvent` is enabled at all.
 
+`events.enabled` (default `true`, mirrors `metrics.enabled`) gates the MQTT publishing side of `ObsEvent` only — `homerun/events` and the retained decision snapshot. `subscribe()` listeners (the `/events` SSE endpoint, any future UI store) are always notified regardless, and `publishLifecycle` (the online/offline status heartbeat) is unaffected — it's a process-liveness signal, not part of `ObsEvent`.
+
 ## Consumer repo
 
 Automations live in a separate consumer repo (`homerun-automations`, public). It depends on this package via a local file link (`"homerun": "file:../homerun"`). The `homerun-generate-ha-types` bin is invoked from there as `npm run codegen`.

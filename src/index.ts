@@ -43,7 +43,7 @@ await new Promise<void>((resolve, reject) => {
 //    `engine` is assigned before any timer can fire.
 const haClient = new HAClient();
 const registry = new AutomationRegistry();
-const eventPublisher = new EventPublisher(mqtt);
+const eventPublisher = new EventPublisher(mqtt, config.events.enabled);
 let engine!: TriggerEngine;
 const timerManager = new TimerManager((e) => engine.dispatch(e));
 const actionRuntime = new ActionRuntime({

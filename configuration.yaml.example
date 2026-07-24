@@ -18,3 +18,8 @@ options:
 
 metrics:
   enabled: false   # set to true to expose Prometheus metrics at GET /metrics
+
+events:
+  enabled: true   # set to false to disable ObsEvent publishing to MQTT (decision/action events).
+                  # The /events SSE endpoint keeps working either way — this only affects the
+                  # MQTT stream (homerun/events, homerun/{location}/{subsystem}/decision).

@@ -58,7 +58,14 @@ export interface LifecycleEvent {
 export class EventPublisher {
   private readonly listeners: Array<(event: ObsEvent) => void> = [];
 
-  constructor(private readonly mqtt: MqttClient) {}
+  // `enabled` gates MQTT publishing of decision/action ObsEvents only (mirrors metrics.enabled;
+  // see #144) — publishLifecycle (status/online heartbeat) is unaffected, and listeners (the
+  // /events SSE endpoint, any future persistent store) are always notified regardless, so
+  // consumers that don't want the MQTT stream aren't forced to lose in-process observability too.
+  constructor(
+    private readonly mqtt: MqttClient,
+    private readonly enabled: boolean = true,
+  ) {}
 
   subscribe(listener: (event: ObsEvent) => void): () => void {
     this.listeners.push(listener);
@@ -69,20 +76,24 @@ export class EventPublisher {
   }
 
   publishDecision(event: ObsEvent): void {
-    const payload = this.safeSerialize(event);
-    if (payload !== undefined) {
-      const ns = event.dry_run ? 'homerun/dev' : 'homerun';
-      this.publish(`${ns}/events`, payload, false);
-      this.publish(`${ns}/${event.location}/${event.subsystem}/decision`, payload, true);
+    if (this.enabled) {
+      const payload = this.safeSerialize(event);
+      if (payload !== undefined) {
+        const ns = event.dry_run ? 'homerun/dev' : 'homerun';
+        this.publish(`${ns}/events`, payload, false);
+        this.publish(`${ns}/${event.location}/${event.subsystem}/decision`, payload, true);
+      }
     }
     this.notifyListeners(event);
   }
 
   publishActionEvent(event: ObsEvent): void {
-    const payload = this.safeSerialize(event);
-    if (payload !== undefined) {
-      const ns = event.dry_run ? 'homerun/dev' : 'homerun';
-      this.publish(`${ns}/events`, payload, false);
+    if (this.enabled) {
+      const payload = this.safeSerialize(event);
+      if (payload !== undefined) {
+        const ns = event.dry_run ? 'homerun/dev' : 'homerun';
+        this.publish(`${ns}/events`, payload, false);
+      }
     }
     this.notifyListeners(event);
   }
