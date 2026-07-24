@@ -47,6 +47,17 @@ export type ObsEvent = ObsEventBase & (
     }
   | { event_type: 'action_started'; action: Action }
   | { event_type: 'action_result'; action: Action; status: 'ok' | 'error'; error?: string }
+  | {
+      // Fires when a dispatched ha.call_service's expected state/attribute change never
+      // arrived within commandAck.timeoutMs — a real signal (device unreachable, Zigbee
+      // mesh failure, HA accepted the call but nothing responded). See #55. Arrives well
+      // after the triggering run's action_result: 'ok' (that only confirms HA accepted the
+      // WS call, not that the device responded), so it can't be folded into that event.
+      event_type: 'action_ack_timeout';
+      action: Action;
+      entity: string;
+      expected: Record<string, unknown>;
+    }
 );
 
 export type LifecycleEventType = 'server_started' | 'server_stopping' | 'rescan_complete' | 'ha_reconnected';

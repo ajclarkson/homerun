@@ -9,6 +9,7 @@ import {
   type HassServiceTarget,
 } from 'home-assistant-js-websocket';
 import { EventEmitter } from 'node:events';
+import type { Action } from '../types/actions.js';
 
 // ---------- Public types ----------
 
@@ -58,6 +59,24 @@ export interface WriteOrigin {
 
 const PENDING_WRITE_TTL_MS = 2000;
 
+// Everything needed to both track a pending ack and, on timeout, publish a self-sufficient
+// action_ack_timeout ObsEvent — kept separate from WriteOrigin/pendingWrites (correlation
+// tagging) so the two concerns don't get conflated in implementation. See #55.
+export interface AckOrigin {
+  correlationId: string;
+  rootCorrelationId?: string;
+  automationId: string;
+  location: string;
+  subsystem: string;
+  action: Action;
+  // entity field/attribute name -> the value the dispatched call is expected to produce.
+  expected: Record<string, unknown>;
+}
+
+export interface AckTimeoutEvent extends AckOrigin {
+  entity_id: string;
+}
+
 // ---------- Internal types ----------
 
 interface EntityRegistryEntry {
@@ -66,15 +85,27 @@ interface EntityRegistryEntry {
   area_id?: string | null;
 }
 
+interface PendingAck extends AckOrigin {
+  timer: NodeJS.Timeout;
+}
+
+function ackSatisfied(expected: Record<string, unknown>, state: EntityState): boolean {
+  return Object.entries(expected).every(([key, value]) =>
+    key === 'state' ? state.state === value : state.attributes[key] === value,
+  );
+}
+
 // ---------- Typed EventEmitter overloads ----------
 
 export declare interface HAClient {
   on(event: 'state_changed', listener: (e: StateChangedEvent) => void): this;
   on(event: 'ready', listener: () => void): this;
   on(event: 'reconnected', listener: () => void): this;
+  on(event: 'action_ack_timeout', listener: (e: AckTimeoutEvent) => void): this;
   emit(event: 'state_changed', e: StateChangedEvent): boolean;
   emit(event: 'ready'): boolean;
   emit(event: 'reconnected'): boolean;
+  emit(event: 'action_ack_timeout', e: AckTimeoutEvent): boolean;
 }
 
 export class HAClient extends EventEmitter {
@@ -86,6 +117,11 @@ export class HAClient extends EventEmitter {
   // entity_id -> origin of the write that's expected to produce a state_changed for it.
   // Self-evicts after PENDING_WRITE_TTL_MS; consumed (deleted) the moment it's matched.
   private readonly pendingWrites = new Map<string, WriteOrigin>();
+
+  // entity_id -> ack tracking for a dispatched call awaiting its expected state/attribute
+  // change. Consumed (timer cleared, deleted) the moment diffAndUpdate sees a satisfying
+  // state_changed; otherwise self-fires action_ack_timeout after its own timeout.
+  private readonly pendingAcks = new Map<string, PendingAck>();
 
   private connection: Connection | null = null;
 
@@ -136,6 +172,19 @@ export class HAClient extends EventEmitter {
   registerPendingWrite(entityId: string, origin: WriteOrigin): void {
     this.pendingWrites.set(entityId, origin);
     setTimeout(() => this.pendingWrites.delete(entityId), PENDING_WRITE_TTL_MS);
+  }
+
+  // Registers that `entityId` is expected to reach `origin.expected` (a field/attribute ->
+  // value map) within `timeoutMs`. Consumed (timer cleared, deleted) by diffAndUpdate the
+  // moment a satisfying state_changed arrives; otherwise emits action_ack_timeout on expiry
+  // with the same origin, so a listener has everything needed to publish a self-sufficient
+  // ObsEvent without HAClient itself knowing about observability. See #55.
+  registerPendingAck(entityId: string, origin: AckOrigin, timeoutMs: number): void {
+    const timer = setTimeout(() => {
+      this.pendingAcks.delete(entityId);
+      this.emit('action_ack_timeout', { ...origin, entity_id: entityId });
+    }, timeoutMs);
+    this.pendingAcks.set(entityId, { ...origin, timer });
   }
 
   disconnect(): void {
@@ -206,6 +255,13 @@ export class HAClient extends EventEmitter {
       // last_updated changes whenever state or attributes change in HA.
       if (!old_state || old_state.last_updated !== new_state.last_updated) {
         this.stateCache.set(id, new_state);
+
+        const ack = this.pendingAcks.get(id);
+        if (ack && ackSatisfied(ack.expected, new_state)) {
+          clearTimeout(ack.timer);
+          this.pendingAcks.delete(id);
+        }
+
         const correlation_id = crypto.randomUUID();
         const origin = this.pendingWrites.get(id);
         if (origin) this.pendingWrites.delete(id);

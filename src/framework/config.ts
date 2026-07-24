@@ -43,6 +43,13 @@ const ConfigSchema = z.object({
     // Defaults to true — preserves existing behaviour for deployments that don't set this.
     enabled: z.boolean().default(true),
   }).default({ enabled: true }),
+  commandAck: z.object({
+    // Opt-in: unlike events.enabled, this is new/experimental behaviour with no prior
+    // installed base to preserve, so it defaults off rather than needing a reason to disable.
+    enabled: z.boolean().default(false),
+    // Needs to accommodate slow Zigbee mesh round-trips, not just fast local calls.
+    timeoutMs: z.coerce.number().int().min(0).default(8_000),
+  }).default({ enabled: false, timeoutMs: 8_000 }),
 });
 
 export type HomerunConfig = z.infer<typeof ConfigSchema>;

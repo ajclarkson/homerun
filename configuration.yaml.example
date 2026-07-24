@@ -23,3 +23,12 @@ events:
   enabled: true   # set to false to disable ObsEvent publishing to MQTT (decision/action events).
                   # The /events SSE endpoint keeps working either way — this only affects the
                   # MQTT stream (homerun/events, homerun/{location}/{subsystem}/decision).
+
+commandAck:
+  enabled: false   # set to true to flag ha.call_service dispatches whose expected state/attribute
+                   # change never arrives — a real signal (device unreachable, mesh failure, HA
+                   # accepted the call but nothing responded). Off by default: experimental, and
+                   # can produce spurious warnings for services outside the data-key-is-attribute-
+                   # name convention it relies on. Publishes an action_ack_timeout ObsEvent + the
+                   # homerun_action_ack_timeout_total metric on timeout.
+  timeoutMs: 8000  # needs to accommodate slow Zigbee mesh round-trips, not just fast local calls

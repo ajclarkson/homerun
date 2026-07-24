@@ -392,6 +392,134 @@ describe('HAClient', () => {
     });
   });
 
+  describe('command ack tracking (#55)', () => {
+    it('emits action_ack_timeout when the expected fields never arrive within the timeout', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        const { client } = await connectAndInitialise({
+          'light.example': makeEntity('off', 'T1'),
+        });
+
+        const timeouts: Array<{ entity_id: string }> = [];
+        client.on('action_ack_timeout', (e) => timeouts.push(e));
+
+        client.registerPendingAck('light.example', {
+          correlationId: 'A',
+          rootCorrelationId: 'A',
+          automationId: 'kitchen:lighting',
+          location: 'kitchen',
+          subsystem: 'lighting',
+          action: { type: 'ha.call_service', domain: 'light', service: 'turn_on', target: { entity_id: 'light.example' } },
+          expected: { state: 'on' },
+        }, 8000);
+
+        vi.advanceTimersByTime(8001);
+
+        expect(timeouts).toHaveLength(1);
+        expect(timeouts[0].entity_id).toBe('light.example');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not emit action_ack_timeout when a matching state_changed arrives before the timeout', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        const { client } = await connectAndInitialise({
+          'light.example': makeEntity('off', 'T1'),
+        });
+
+        const timeouts: unknown[] = [];
+        client.on('action_ack_timeout', (e) => timeouts.push(e));
+
+        client.registerPendingAck('light.example', {
+          correlationId: 'A',
+          rootCorrelationId: 'A',
+          automationId: 'kitchen:lighting',
+          location: 'kitchen',
+          subsystem: 'lighting',
+          action: { type: 'ha.call_service', domain: 'light', service: 'turn_on', target: { entity_id: 'light.example' } },
+          expected: { state: 'on' },
+        }, 8000);
+
+        capturedSubscribeCallback!(snapshot({
+          'light.example': makeEntity('on', 'T2'),
+        }));
+
+        vi.advanceTimersByTime(8001);
+
+        expect(timeouts).toHaveLength(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not consume the pending ack when a state_changed arrives that does not satisfy the expected fields', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        const { client } = await connectAndInitialise({
+          'light.example': makeEntity('off', 'T1', { brightness: 100 }),
+        });
+
+        const timeouts: unknown[] = [];
+        client.on('action_ack_timeout', (e) => timeouts.push(e));
+
+        client.registerPendingAck('light.example', {
+          correlationId: 'A',
+          rootCorrelationId: 'A',
+          automationId: 'kitchen:lighting',
+          location: 'kitchen',
+          subsystem: 'lighting',
+          action: { type: 'ha.call_service', domain: 'light', service: 'turn_on', target: { entity_id: 'light.example' } },
+          expected: { state: 'on' },
+        }, 8000);
+
+        // An unrelated attribute update on the same entity — doesn't satisfy the expected state.
+        capturedSubscribeCallback!(snapshot({
+          'light.example': makeEntity('off', 'T2', { brightness: 120 }),
+        }));
+
+        vi.advanceTimersByTime(8001);
+
+        expect(timeouts).toHaveLength(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('matches expected attribute values, not just state', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        const { client } = await connectAndInitialise({
+          'climate.example': makeEntity('heat', 'T1', { temperature: 18 }),
+        });
+
+        const timeouts: unknown[] = [];
+        client.on('action_ack_timeout', (e) => timeouts.push(e));
+
+        client.registerPendingAck('climate.example', {
+          correlationId: 'A',
+          rootCorrelationId: 'A',
+          automationId: 'living_room:heating',
+          location: 'living_room',
+          subsystem: 'heating',
+          action: { type: 'ha.call_service', domain: 'climate', service: 'set_temperature', target: { entity_id: 'climate.example' }, data: { temperature: 21 } },
+          expected: { temperature: 21 },
+        }, 8000);
+
+        capturedSubscribeCallback!(snapshot({
+          'climate.example': makeEntity('heat', 'T2', { temperature: 21 }),
+        }));
+
+        vi.advanceTimersByTime(8001);
+
+        expect(timeouts).toHaveLength(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   describe('reconnect', () => {
     it('does not emit state_changed events during reconnect repopulate', async () => {
       const { client } = await connectAndInitialise({
