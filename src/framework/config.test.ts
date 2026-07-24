@@ -50,6 +50,15 @@ describe('parseConfig — valid configuration', () => {
     const config = parseConfig(MINIMAL + '\noptions:\n  dry_run: true');
     expect(config.options.dry_run).toBe(true);
   });
+
+  it('defaults events.enabled to true', () => {
+    expect(parseConfig(MINIMAL).events.enabled).toBe(true);
+  });
+
+  it('respects explicit events.enabled: false', () => {
+    const config = parseConfig(MINIMAL + '\nevents:\n  enabled: false');
+    expect(config.events.enabled).toBe(false);
+  });
 });
 
 // ---------- !secret resolution ----------

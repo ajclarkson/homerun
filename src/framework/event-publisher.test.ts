@@ -155,6 +155,47 @@ describe('EventPublisher — publishActionEvent', () => {
   });
 });
 
+describe('EventPublisher — enabled: false', () => {
+  let mqtt: MockMqtt;
+  let publisher: EventPublisher;
+
+  beforeEach(() => {
+    mqtt = makeMqtt();
+    publisher = new EventPublisher(mqtt as unknown as MqttClient, false);
+  });
+
+  it('does not publish decision events to MQTT', () => {
+    publisher.publishDecision(makeDecisionEvent());
+    expect(mqtt.publishAsync).not.toHaveBeenCalled();
+  });
+
+  it('does not publish action events to MQTT', () => {
+    publisher.publishActionEvent(makeDecisionEvent({ event_type: 'action_started' }));
+    expect(mqtt.publishAsync).not.toHaveBeenCalled();
+  });
+
+  it('still notifies subscribed listeners for decision events', () => {
+    const listener = vi.fn();
+    publisher.subscribe(listener);
+    const event = makeDecisionEvent();
+    publisher.publishDecision(event);
+    expect(listener).toHaveBeenCalledWith(event);
+  });
+
+  it('still notifies subscribed listeners for action events', () => {
+    const listener = vi.fn();
+    publisher.subscribe(listener);
+    const event = makeDecisionEvent({ event_type: 'action_started' });
+    publisher.publishActionEvent(event);
+    expect(listener).toHaveBeenCalledWith(event);
+  });
+
+  it('still publishes lifecycle events to MQTT (unaffected by the events flag)', () => {
+    publisher.publishLifecycle('server_started', 1);
+    expect(mqtt.publishAsync).toHaveBeenCalled();
+  });
+});
+
 describe('EventPublisher — publishLifecycle', () => {
   let mqtt: MockMqtt;
   let publisher: EventPublisher;

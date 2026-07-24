@@ -39,6 +39,10 @@ const ConfigSchema = z.object({
   metrics: z.object({
     enabled: z.boolean().default(false),
   }).default({ enabled: false }),
+  events: z.object({
+    // Defaults to true — preserves existing behaviour for deployments that don't set this.
+    enabled: z.boolean().default(true),
+  }).default({ enabled: true }),
 });
 
 export type HomerunConfig = z.infer<typeof ConfigSchema>;
