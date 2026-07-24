@@ -161,6 +161,16 @@ All observability events are published under the `homerun/` namespace:
 
 Dry-run events are routed to `homerun/dev/*` so they cannot overwrite retained live decision state.
 
+## Observability: Prometheus vs ObsEvent
+
+The framework has two independent observability outputs, each the source of truth for a different question. Neither is a subset of the other — don't use one to reconstruct what the other already answers.
+
+**Prometheus (`MetricsBackend`, `homerun_*` metrics)** is for aggregates: rates, counts, durations, trends over time. `homerun_actions_dispatched_total`/`_succeeded_total`/`_failed_total`, `homerun_action_duration_seconds`, `homerun_pipeline_runs_total`, `homerun_automations_loaded`. The right tool for "how often is X happening" or "what's the failure rate for this action type" — it's already structured for `rate()`/`sum by (...)` queries. Opt-in via `metrics.enabled` in config; a no-op backend (`NoopMetricsBackend`) is used when disabled, so metrics calls are always safe to make regardless of whether anything is actually collecting them.
+
+**`ObsEvent` (`homerun/events`, `homerun/{location}/{subsystem}/decision`, and the `/events` SSE endpoint)** is for point-in-time audit and causal tracing: one specific pipeline run, correlated via `correlation_id`/`root_correlation_id`/`parent_correlation_id`, with the full decision reasoning attached (`trigger`, `conditions`, `reason`, `abort_kind`). The right tool for "what exactly happened on this run and why," not for aggregate questions — parsing the event stream to compute a success rate is the wrong layer; that's what the Prometheus counters already do.
+
+The `/events` SSE endpoint (`ApiServer`) is fed by `EventPublisher.subscribe()`, an in-process listener list — separate from the MQTT `publish()` calls. Anything hooking into `ObsEvent`s in-process (SSE today; a future persistent store for a UI) should use `subscribe()`, not consume the MQTT stream — this keeps it working independently of whether MQTT publishing for `ObsEvent` is enabled at all.
+
 ## Consumer repo
 
 Automations live in a separate consumer repo (`homerun-automations`, public). It depends on this package via a local file link (`"homerun": "file:../homerun"`). The `homerun-generate-ha-types` bin is invoked from there as `npm run codegen`.
