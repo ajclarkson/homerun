@@ -53,6 +53,7 @@ const actionRuntime = new ActionRuntime({
   eventPublisher,
   dryRun,
   metrics: metricsBackend,
+  commandAck: config.commandAck,
 });
 
 // 3. Initial automation load — must complete before the engine and scheduler start.

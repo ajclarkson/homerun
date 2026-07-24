@@ -59,6 +59,18 @@ describe('parseConfig — valid configuration', () => {
     const config = parseConfig(MINIMAL + '\nevents:\n  enabled: false');
     expect(config.events.enabled).toBe(false);
   });
+
+  it('defaults commandAck to disabled with an 8s timeout', () => {
+    const config = parseConfig(MINIMAL);
+    expect(config.commandAck.enabled).toBe(false);
+    expect(config.commandAck.timeoutMs).toBe(8000);
+  });
+
+  it('respects explicit commandAck settings', () => {
+    const config = parseConfig(MINIMAL + '\ncommandAck:\n  enabled: true\n  timeoutMs: 15000');
+    expect(config.commandAck.enabled).toBe(true);
+    expect(config.commandAck.timeoutMs).toBe(15000);
+  });
 });
 
 // ---------- !secret resolution ----------

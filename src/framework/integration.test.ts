@@ -28,6 +28,7 @@ function makeHarness(dryRun = false) {
     state: vi.fn().mockReturnValue(undefined),
     context: { entitiesByLabel: vi.fn().mockReturnValue([]), labelsFor: vi.fn().mockReturnValue([]) },
     callService: haCallService,
+    on: vi.fn(),
   } as unknown as HAClient;
 
   const timerDispatch = vi.fn<(e: TriggerEvent) => void>();

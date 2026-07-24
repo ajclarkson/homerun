@@ -6,12 +6,19 @@ import type { Action } from '../types/actions.js';
 // ---------- Mocks ----------
 
 function makeDeps(dryRun = false) {
-  const haClient = { callService: vi.fn().mockResolvedValue(undefined), registerPendingWrite: vi.fn() };
+  const haClient = {
+    callService: vi.fn().mockResolvedValue(undefined),
+    registerPendingWrite: vi.fn(),
+    registerPendingAck: vi.fn(),
+    state: vi.fn().mockReturnValue(undefined),
+    on: vi.fn(),
+  };
   const mqttClient = { publishAsync: vi.fn().mockResolvedValue(undefined) };
   const timerManager = { start: vi.fn(), cancel: vi.fn() };
   const eventPublisher = { publishActionEvent: vi.fn() };
   const metrics = { incrementCounter: vi.fn(), observeHistogram: vi.fn() };
-  return { haClient, mqttClient, timerManager, eventPublisher, dryRun, metrics };
+  const commandAck = { enabled: false, timeoutMs: 8000 };
+  return { haClient, mqttClient, timerManager, eventPublisher, dryRun, metrics, commandAck };
 }
 
 function makeCtx(overrides: Partial<ExecutionContext> = {}): ExecutionContext {
@@ -204,6 +211,130 @@ describe('ActionRuntime — dry-run mode', () => {
     const events = deps.eventPublisher.publishActionEvent.mock.calls.map((c: unknown[]) => c[0] as { event_type: string; dry_run: boolean });
     expect(events).toHaveLength(2);
     expect(events.every((e) => e.dry_run === true)).toBe(true);
+  });
+});
+
+// ---------- Command ack tracking (#55) ----------
+
+describe('ActionRuntime — command ack tracking', () => {
+  let deps: ReturnType<typeof makeDeps>;
+
+  beforeEach(() => { deps = makeDeps(); });
+
+  it('does not register a pending ack when commandAck.enabled is false', async () => {
+    const rt = new ActionRuntime(deps as never);
+    const action: Action = { type: 'ha.call_service', domain: 'light', service: 'turn_on', target: { entity_id: 'light.example' } };
+    await rt.execute([action], makeCtx());
+    expect(deps.haClient.registerPendingAck).not.toHaveBeenCalled();
+  });
+
+  it('registers a pending ack with state: on for turn_on when enabled', async () => {
+    deps.commandAck.enabled = true;
+    const rt = new ActionRuntime(deps as never);
+    const action: Action = { type: 'ha.call_service', domain: 'light', service: 'turn_on', target: { entity_id: 'light.example' } };
+    await rt.execute([action], makeCtx({ correlationId: 'cid-1', rootCorrelationId: 'A', automationId: 'kitchen:lighting', location: 'kitchen', subsystem: 'lighting' }));
+    expect(deps.haClient.registerPendingAck).toHaveBeenCalledWith('light.example', {
+      correlationId: 'cid-1',
+      rootCorrelationId: 'A',
+      automationId: 'kitchen:lighting',
+      location: 'kitchen',
+      subsystem: 'lighting',
+      action,
+      expected: { state: 'on' },
+    }, 8000);
+  });
+
+  it('registers a pending ack with state: off for turn_off when enabled', async () => {
+    deps.commandAck.enabled = true;
+    const rt = new ActionRuntime(deps as never);
+    const action: Action = { type: 'ha.call_service', domain: 'light', service: 'turn_off', target: { entity_id: 'light.example' } };
+    await rt.execute([action], makeCtx());
+    expect(deps.haClient.registerPendingAck).toHaveBeenCalledWith('light.example', expect.objectContaining({ expected: { state: 'off' } }), 8000);
+  });
+
+  it('infers expected attributes from data keys by HA convention', async () => {
+    deps.commandAck.enabled = true;
+    const rt = new ActionRuntime(deps as never);
+    const action: Action = { type: 'ha.call_service', domain: 'climate', service: 'set_temperature', target: { entity_id: 'climate.example' }, data: { temperature: 21 } };
+    await rt.execute([action], makeCtx());
+    expect(deps.haClient.registerPendingAck).toHaveBeenCalledWith('climate.example', expect.objectContaining({ expected: { temperature: 21 } }), 8000);
+  });
+
+  it('excludes known non-attribute data keys like transition', async () => {
+    deps.commandAck.enabled = true;
+    const rt = new ActionRuntime(deps as never);
+    const action: Action = { type: 'ha.call_service', domain: 'light', service: 'turn_on', target: { entity_id: 'light.example' }, data: { brightness: 200, transition: 2 } };
+    await rt.execute([action], makeCtx());
+    expect(deps.haClient.registerPendingAck).toHaveBeenCalledWith('light.example', expect.objectContaining({ expected: { state: 'on', brightness: 200 } }), 8000);
+  });
+
+  it('skips tracking when the entity already matches every expected field (idempotent)', async () => {
+    deps.commandAck.enabled = true;
+    deps.haClient.state.mockReturnValue({ entity_id: 'light.example', state: 'on', attributes: {}, last_changed: '', last_updated: '' });
+    const rt = new ActionRuntime(deps as never);
+    const action: Action = { type: 'ha.call_service', domain: 'light', service: 'turn_on', target: { entity_id: 'light.example' } };
+    await rt.execute([action], makeCtx());
+    expect(deps.haClient.registerPendingAck).not.toHaveBeenCalled();
+  });
+
+  it('does not skip when only some expected fields already match', async () => {
+    deps.commandAck.enabled = true;
+    deps.haClient.state.mockReturnValue({ entity_id: 'light.example', state: 'on', attributes: { brightness: 100 }, last_changed: '', last_updated: '' });
+    const rt = new ActionRuntime(deps as never);
+    const action: Action = { type: 'ha.call_service', domain: 'light', service: 'turn_on', target: { entity_id: 'light.example' }, data: { brightness: 200 } };
+    await rt.execute([action], makeCtx());
+    expect(deps.haClient.registerPendingAck).toHaveBeenCalled();
+  });
+
+  it('does not track when there is no target entity_id', async () => {
+    deps.commandAck.enabled = true;
+    const rt = new ActionRuntime(deps as never);
+    const action: Action = { type: 'ha.call_service', domain: 'light', service: 'turn_on' };
+    await rt.execute([action], makeCtx());
+    expect(deps.haClient.registerPendingAck).not.toHaveBeenCalled();
+  });
+
+  it('does not track in dry-run mode', async () => {
+    deps = makeDeps(true);
+    deps.commandAck.enabled = true;
+    const rt = new ActionRuntime(deps as never);
+    const action: Action = { type: 'ha.call_service', domain: 'light', service: 'turn_on', target: { entity_id: 'light.example' } };
+    await rt.execute([action], makeCtx());
+    expect(deps.haClient.registerPendingAck).not.toHaveBeenCalled();
+  });
+
+  it('subscribes to action_ack_timeout and publishes an ObsEvent + increments a metric on fire', () => {
+    new ActionRuntime(deps as never);
+    const handler = deps.haClient.on.mock.calls.find((c: unknown[]) => c[0] === 'action_ack_timeout')?.[1] as (e: unknown) => void;
+    expect(handler).toBeInstanceOf(Function);
+
+    const action: Action = { type: 'ha.call_service', domain: 'light', service: 'turn_on', target: { entity_id: 'light.example' } };
+    handler({
+      correlationId: 'cid-1',
+      rootCorrelationId: 'A',
+      automationId: 'kitchen:lighting',
+      location: 'kitchen',
+      subsystem: 'lighting',
+      action,
+      expected: { state: 'on' },
+      entity_id: 'light.example',
+    });
+
+    expect(deps.eventPublisher.publishActionEvent).toHaveBeenCalledWith(expect.objectContaining({
+      event_type: 'action_ack_timeout',
+      correlation_id: 'cid-1',
+      root_correlation_id: 'A',
+      automation_id: 'kitchen:lighting',
+      location: 'kitchen',
+      subsystem: 'lighting',
+      action,
+      entity: 'light.example',
+      expected: { state: 'on' },
+    }));
+    expect(deps.metrics.incrementCounter).toHaveBeenCalledWith(
+      'homerun_action_ack_timeout_total',
+      { location: 'kitchen', action_type: 'ha.call_service' },
+    );
   });
 });
 

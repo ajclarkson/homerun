@@ -1,5 +1,13 @@
+export interface HaCallServiceAction {
+  type: 'ha.call_service';
+  domain: string;
+  service: string;
+  target?: { entity_id: string };
+  data?: Record<string, unknown>;
+}
+
 export type Action =
-  | { type: 'ha.call_service'; domain: string; service: string; target?: { entity_id: string }; data?: Record<string, unknown> }
+  | HaCallServiceAction
   | {
       type: 'mqtt.publish';
       topic: string;

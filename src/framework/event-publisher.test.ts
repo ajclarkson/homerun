@@ -153,6 +153,24 @@ describe('EventPublisher — publishActionEvent', () => {
     expect(() => publisher.publishActionEvent(makeDecisionEvent({ event_type: 'action_result' }))).not.toThrow();
     await new Promise((r) => setTimeout(r, 0));
   });
+
+  it('publishes an action_ack_timeout event to homerun/events with entity and expected', async () => {
+    const event = makeDecisionEvent({
+      event_type: 'action_ack_timeout',
+      action: { type: 'ha.call_service', domain: 'light', service: 'turn_on', target: { entity_id: 'light.example' } },
+      entity: 'light.example',
+      expected: { state: 'on' },
+    });
+    publisher.publishActionEvent(event);
+    await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalled());
+
+    const call = callForTopic(mqtt, 'homerun/events')!;
+    expect(JSON.parse(call[1] as string)).toMatchObject({
+      event_type: 'action_ack_timeout',
+      entity: 'light.example',
+      expected: { state: 'on' },
+    });
+  });
 });
 
 describe('EventPublisher — enabled: false', () => {
