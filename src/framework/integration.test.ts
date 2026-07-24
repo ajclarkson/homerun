@@ -84,7 +84,7 @@ describe('Integration — trigger → decision → HA action', () => {
     expect(publishedActions).toHaveLength(2); // action_started + action_result
     expect((publishedActions[0] as Record<string, unknown>).event_type).toBe('action_started');
     expect((publishedActions[1] as Record<string, unknown>).event_type).toBe('action_result');
-    expect((publishedActions[1] as Record<string, unknown>).reason).toBe('ok');
+    expect((publishedActions[1] as Record<string, unknown>).status).toBe('ok');
   });
 
   it('propagates correlation_id from trigger through decision and action events', async () => {
@@ -128,7 +128,7 @@ describe('Integration — trigger → decision → HA action', () => {
     expect(haCallService).not.toHaveBeenCalled();
     expect(publishedActions).toHaveLength(0);
     expect(publishedDecisions).toHaveLength(1);
-    expect(publishedDecisions[0]).toMatchObject({ event_type: 'abort', reason: 'presence_override' });
+    expect(publishedDecisions[0]).toMatchObject({ event_type: 'abort', abort_kind: 'guard', reason: 'presence_override' });
   });
 
   it('publishes abort and skips actions when HA action fails, but subsequent actions still run', async () => {
@@ -155,8 +155,9 @@ describe('Integration — trigger → decision → HA action', () => {
     // Both actions ran — second one succeeds
     expect(haCallService).toHaveBeenCalledTimes(2);
     const results = publishedActions.filter((e) => (e as Record<string, unknown>).event_type === 'action_result') as Array<Record<string, unknown>>;
-    expect(results[0].reason).toContain('HA unavailable');
-    expect(results[1].reason).toBe('ok');
+    expect(results[0].status).toBe('error');
+    expect(results[0].error).toContain('HA unavailable');
+    expect(results[1].status).toBe('ok');
   });
 });
 

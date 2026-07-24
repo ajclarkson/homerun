@@ -85,6 +85,26 @@ Unknown action types must log a warning and emit an error observability event �
 
 There's no way for the framework to detect a missing `impliesEntity` — a topic string carries no information about which HA entity, if any, mirrors it, and that mapping lives entirely in HA's own (often manual) MQTT config. Leaving it unset doesn't break anything; it just means the resulting `state_changed`, and anything that reacts to it, won't be traceable back to this automation's run.
 
+## Decision and observability events
+
+```typescript
+interface Decision {
+  decision: string;
+  reason?: string;
+  actions: Action[];
+  // Free-form, author-curated: the conditions that determined this decision (e.g. lux level,
+  // house mode). Distinct from `trigger` on the published event (what happened) — this is why
+  // it was allowed to happen this way.
+  conditions?: Record<string, unknown>;
+}
+```
+
+Every pipeline run publishes an `ObsEvent` (`schema: 'home.events.v2'`) to `homerun/events`, and — for `decision`/`abort` only — a retained snapshot to `homerun/{location}/{subsystem}/decision`. It's a discriminated union on `event_type`, not one flat shape:
+
+- `decision` — carries `trigger` (a trimmed summary of the real trigger — `{ type, entity_id?, to?, from?, cron?, ... }` depending on trigger type), `decision`/`reason`/`conditions` from the reducer, `actions`, and `hasAction: boolean` (framework-computed from `actions.length > 0` — filter on this, not on parsing `decision` strings, to find every decision that resulted in at least one action).
+- `abort` — carries `trigger` and `abort_kind: 'disabled' | 'unhandled_error' | 'guard'` (`'guard'` covers every author-triggered `abort()` call; `reason` on top of that is whatever string `abort()` was given).
+- `action_started` / `action_result` — one pair per action in the plan, each carrying the single `action` it's about (not an array — always exactly one). `action_result` carries `status: 'ok' | 'error'` and, on failure, `error` with the detail. Emitted as two separate wire events deliberately: a `action_started` with no matching `action_result` is itself a signal (a hung HA call, a crash mid-action).
+
 ## HAContext
 
 Passed as the second argument to every context builder. Provides synchronous access to entity registry data loaded at startup.

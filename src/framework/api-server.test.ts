@@ -229,13 +229,17 @@ describe('ApiServer', () => {
       const decoder = new TextDecoder();
 
       const event: Parameters<typeof obs.publishDecision>[0] = {
-        schema: 'home.events.v1',
+        schema: 'home.events.v2',
         correlation_id: 'test-123',
+        root_correlation_id: 'test-123',
         automation_id: 'parlour:lighting',
         location: 'parlour',
         subsystem: 'lighting',
         event_type: 'decision',
+        trigger: { type: 'on_start' },
         decision: 'lights_on',
+        actions: [],
+        hasAction: false,
         timestamp: new Date().toISOString(),
       };
 
@@ -261,12 +265,17 @@ describe('ApiServer', () => {
       // Publishing should not throw even after client disconnected
       expect(() =>
         obs.publishDecision({
-          schema: 'home.events.v1',
+          schema: 'home.events.v2',
           correlation_id: 'x',
+          root_correlation_id: 'x',
           automation_id: 'a',
           location: 'l',
           subsystem: 's',
-          type: 'decision',
+          event_type: 'decision',
+          trigger: { type: 'on_start' },
+          decision: 'ok',
+          actions: [],
+          hasAction: false,
           timestamp: new Date().toISOString(),
         }),
       ).not.toThrow();
