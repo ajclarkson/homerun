@@ -1,7 +1,7 @@
 import type { Automation } from '../types/automation.js';
 import type { TriggerEvent } from '../types/triggers.js';
 import { summarizeTrigger } from '../types/triggers.js';
-import { isAbort } from '../types/automation.js';
+import { isAbort, UnavailableInputError } from '../types/automation.js';
 import type { HAClient } from './ha-client.js';
 import type { EventPublisher, ObsEvent } from './event-publisher.js';
 import type { ActionRuntime } from './action-runtime.js';
@@ -53,8 +53,12 @@ export async function runPipeline(
   let ctx: unknown;
   try {
     ctx = automation.context(haClient.state, haClient.context, event);
-  } catch {
-    deps.eventPublisher.publishDecision({ ...base, event_type: 'abort', abort_kind: 'unhandled_error', trigger });
+  } catch (err) {
+    if (err instanceof UnavailableInputError) {
+      deps.eventPublisher.publishDecision({ ...base, event_type: 'abort', abort_kind: 'unavailable_input', entity: err.entityId, trigger });
+    } else {
+      deps.eventPublisher.publishDecision({ ...base, event_type: 'abort', abort_kind: 'unhandled_error', trigger });
+    }
     return;
   }
 

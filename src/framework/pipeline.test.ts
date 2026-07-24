@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { runPipeline } from './pipeline.js';
 import type { Automation } from '../types/automation.js';
 import type { TriggerEvent } from '../types/triggers.js';
-import { abort } from '../types/automation.js';
+import { abort, UnavailableInputError } from '../types/automation.js';
 
 // ---------- Mocks ----------
 
@@ -246,6 +246,28 @@ describe('runPipeline — exception in context', () => {
     const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
     expect(event.event_type).toBe('abort');
     expect(event.abort_kind).toBe('unhandled_error');
+  });
+
+  it('produces abort with abort_kind unavailable_input and the entity when context throws UnavailableInputError', async () => {
+    const deps = makeDeps();
+    const ha = makeHAClient();
+    const auto = makeAutomation({
+      context: vi.fn().mockImplementation(() => { throw new UnavailableInputError('binary_sensor.hallway_downstairs_occupied'); }),
+    });
+    await runPipeline(auto, onStartEvent, ha as never, deps as never);
+    const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
+    expect(event.event_type).toBe('abort');
+    expect(event.abort_kind).toBe('unavailable_input');
+    expect(event.entity).toBe('binary_sensor.hallway_downstairs_occupied');
+  });
+
+  it('does not set entity on unhandled_error aborts', async () => {
+    const deps = makeDeps();
+    const ha = makeHAClient();
+    const auto = makeAutomation({ context: vi.fn().mockImplementation(() => { throw new Error('boom'); }) });
+    await runPipeline(auto, onStartEvent, ha as never, deps as never);
+    const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
+    expect(event.entity).toBeUndefined();
   });
 
   it('does not affect other pipeline invocations', async () => {
