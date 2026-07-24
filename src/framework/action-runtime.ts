@@ -49,7 +49,12 @@ const SET_VALUE_TO_STATE_DOMAINS = new Set(['number', 'input_number', 'input_tex
 // Domains/services excluded from tracking entirely rather than guessing at a convention that
 // doesn't hold cleanly — group membership attributes don't reliably come back as an exact
 // match of what was passed (ordering, or reflecting the whole group rather than the delta).
-const UNTRACKED_SERVICES = new Set(['media_player.join', 'media_player.unjoin']);
+// scene.turn_on is here for a different reason (#156): a scene entity's `state` is a
+// last-activated timestamp, not 'on'/'off', so the generic turn_on special-case never
+// matches — and even a timestamp-based check would only confirm HA accepted the call, not
+// that the scene's member entities (the things that actually matter) responded. Real
+// coverage would mean tracking each member entity individually — see #155.
+const UNTRACKED_SERVICES = new Set(['media_player.join', 'media_player.unjoin', 'scene.turn_on']);
 
 // Computes the field/attribute -> value map a dispatched call is expected to produce, or
 // undefined if there's nothing to track (no inferable fields, an excluded service, or the
