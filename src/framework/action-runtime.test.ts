@@ -268,6 +268,50 @@ describe('ActionRuntime — command ack tracking', () => {
     expect(deps.haClient.registerPendingAck).toHaveBeenCalledWith('light.example', expect.objectContaining({ expected: { state: 'on', brightness: 200 } }), 8000);
   });
 
+  it('maps set_value on number domain to expected state, not an attribute called value (#153)', async () => {
+    deps.commandAck.enabled = true;
+    const rt = new ActionRuntime(deps as never);
+    const action: Action = { type: 'ha.call_service', domain: 'number', service: 'set_value', target: { entity_id: 'number.example' }, data: { value: 21 } };
+    await rt.execute([action], makeCtx());
+    expect(deps.haClient.registerPendingAck).toHaveBeenCalledWith('number.example', expect.objectContaining({ expected: { state: 21 } }), 8000);
+  });
+
+  it.each(['number', 'input_number', 'input_text', 'input_select', 'text'])(
+    'maps set_value on %s domain to expected state (#153)',
+    async (domain) => {
+      deps.commandAck.enabled = true;
+      const rt = new ActionRuntime(deps as never);
+      const action: Action = { type: 'ha.call_service', domain, service: 'set_value', target: { entity_id: `${domain}.example` }, data: { value: 'x' } };
+      await rt.execute([action], makeCtx());
+      expect(deps.haClient.registerPendingAck).toHaveBeenCalledWith(`${domain}.example`, expect.objectContaining({ expected: { state: 'x' } }), 8000);
+    },
+  );
+
+  it('skips set_value tracking when the entity state already matches (idempotent) (#153)', async () => {
+    deps.commandAck.enabled = true;
+    deps.haClient.state.mockReturnValue({ entity_id: 'number.example', state: '21', attributes: {}, last_changed: '', last_updated: '' });
+    const rt = new ActionRuntime(deps as never);
+    const action: Action = { type: 'ha.call_service', domain: 'number', service: 'set_value', target: { entity_id: 'number.example' }, data: { value: '21' } };
+    await rt.execute([action], makeCtx());
+    expect(deps.haClient.registerPendingAck).not.toHaveBeenCalled();
+  });
+
+  it('does not track media_player.join at all (#153)', async () => {
+    deps.commandAck.enabled = true;
+    const rt = new ActionRuntime(deps as never);
+    const action: Action = { type: 'ha.call_service', domain: 'media_player', service: 'join', target: { entity_id: 'media_player.parlour' }, data: { group_members: ['media_player.kitchen'] } };
+    await rt.execute([action], makeCtx());
+    expect(deps.haClient.registerPendingAck).not.toHaveBeenCalled();
+  });
+
+  it('does not track media_player.unjoin at all (#153)', async () => {
+    deps.commandAck.enabled = true;
+    const rt = new ActionRuntime(deps as never);
+    const action: Action = { type: 'ha.call_service', domain: 'media_player', service: 'unjoin', target: { entity_id: 'media_player.parlour' } };
+    await rt.execute([action], makeCtx());
+    expect(deps.haClient.registerPendingAck).not.toHaveBeenCalled();
+  });
+
   it('skips tracking when the entity already matches every expected field (idempotent)', async () => {
     deps.commandAck.enabled = true;
     deps.haClient.state.mockReturnValue({ entity_id: 'light.example', state: 'on', attributes: {}, last_changed: '', last_updated: '' });
