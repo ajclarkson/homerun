@@ -34,7 +34,11 @@ function run<C>(automation: Automation<C>, options: TestOptions): Decision | Abo
 
   const ctx = automation.context(stateFunc as HAState, haContext, event);
   if (isAbort(ctx)) return ctx;
-  return automation.reduce(ctx);
+
+  const result = automation.reduce(ctx);
+  // Mirrors runPipeline's default in src/framework/pipeline.ts, so tests observe the same
+  // `conditions` a real run would publish.
+  return { ...result, conditions: result.conditions ?? (ctx as Record<string, unknown>) };
 }
 
 export function testAutomation<C>(automation: Automation<C>, options: TestOptions): Decision {
