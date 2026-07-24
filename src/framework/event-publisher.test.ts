@@ -87,6 +87,34 @@ describe('EventPublisher — publishDecision', () => {
     expect(() => publisher.publishDecision(makeDecisionEvent())).not.toThrow();
     await new Promise((r) => setTimeout(r, 0));
   });
+
+  it('does not throw when the event contains a value JSON.stringify cannot serialize', () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const event = makeDecisionEvent({ conditions: circular });
+    expect(() => publisher.publishDecision(event)).not.toThrow();
+    expect(mqtt.publishAsync).not.toHaveBeenCalled();
+  });
+
+  it('still notifies listeners when the event fails to serialize', () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const event = makeDecisionEvent({ conditions: circular });
+    const listener = vi.fn();
+    publisher.subscribe(listener);
+    publisher.publishDecision(event);
+    expect(listener).toHaveBeenCalledWith(event);
+  });
+
+  it('does not let one throwing listener prevent another listener or the MQTT publish', () => {
+    const throwingListener = vi.fn(() => { throw new Error('listener bug'); });
+    const healthyListener = vi.fn();
+    publisher.subscribe(throwingListener);
+    publisher.subscribe(healthyListener);
+    expect(() => publisher.publishDecision(makeDecisionEvent())).not.toThrow();
+    expect(healthyListener).toHaveBeenCalledOnce();
+    expect(mqtt.publishAsync).toHaveBeenCalled();
+  });
 });
 
 describe('EventPublisher — publishActionEvent', () => {

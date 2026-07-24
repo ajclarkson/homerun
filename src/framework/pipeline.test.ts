@@ -147,6 +147,34 @@ describe('runPipeline — happy path', () => {
   });
 });
 
+// ---------- conditions default to the context object ----------
+
+describe('runPipeline — conditions default to context', () => {
+  it('defaults conditions to the context object when reduce does not set one', async () => {
+    const deps = makeDeps();
+    const ha = makeHAClient();
+    const auto = makeAutomation({
+      context: vi.fn().mockReturnValue({ lux: 40, houseMode: 'normal' }),
+      reduce: vi.fn().mockReturnValue({ decision: 'lights_on', actions: [] }),
+    });
+    await runPipeline(auto, onStartEvent, ha as never, deps as never);
+    const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
+    expect(event.conditions).toEqual({ lux: 40, houseMode: 'normal' });
+  });
+
+  it('uses the explicit conditions from reduce when provided, not the raw context', async () => {
+    const deps = makeDeps();
+    const ha = makeHAClient();
+    const auto = makeAutomation({
+      context: vi.fn().mockReturnValue({ lux: 40, internalOnly: 'noise' }),
+      reduce: vi.fn().mockReturnValue({ decision: 'lights_on', actions: [], conditions: { lux: 40 } }),
+    });
+    await runPipeline(auto, onStartEvent, ha as never, deps as never);
+    const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
+    expect(event.conditions).toEqual({ lux: 40 });
+  });
+});
+
 // ---------- Disabled automation ----------
 
 describe('runPipeline — disabled automation', () => {

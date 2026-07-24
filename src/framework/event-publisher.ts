@@ -69,17 +69,22 @@ export class EventPublisher {
   }
 
   publishDecision(event: ObsEvent): void {
-    const payload = JSON.stringify(event);
-    const ns = event.dry_run ? 'homerun/dev' : 'homerun';
-    this.publish(`${ns}/events`, payload, false);
-    this.publish(`${ns}/${event.location}/${event.subsystem}/decision`, payload, true);
-    for (const l of this.listeners) l(event);
+    const payload = this.safeSerialize(event);
+    if (payload !== undefined) {
+      const ns = event.dry_run ? 'homerun/dev' : 'homerun';
+      this.publish(`${ns}/events`, payload, false);
+      this.publish(`${ns}/${event.location}/${event.subsystem}/decision`, payload, true);
+    }
+    this.notifyListeners(event);
   }
 
   publishActionEvent(event: ObsEvent): void {
-    const ns = event.dry_run ? 'homerun/dev' : 'homerun';
-    this.publish(`${ns}/events`, JSON.stringify(event), false);
-    for (const l of this.listeners) l(event);
+    const payload = this.safeSerialize(event);
+    if (payload !== undefined) {
+      const ns = event.dry_run ? 'homerun/dev' : 'homerun';
+      this.publish(`${ns}/events`, payload, false);
+    }
+    this.notifyListeners(event);
   }
 
   publishLifecycle(type: LifecycleEventType, automationCount: number, dryRun = false): void {
@@ -100,5 +105,30 @@ export class EventPublisher {
     this.mqtt.publishAsync(topic, payload, { retain }).catch((err: unknown) => {
       console.error(`[EventPublisher] MQTT publish failed on ${topic}:`, err);
     });
+  }
+
+  // Observability must never affect automation behaviour — a decision/action event that fails
+  // to serialize (e.g. conditions defaulting to a context object with a circular reference) must
+  // not throw, since runPipeline awaits this alongside actionRuntime.execute() in the same
+  // Promise.all; a synchronous throw here would silently prevent real actions from ever running.
+  private safeSerialize(event: ObsEvent): string | undefined {
+    try {
+      return JSON.stringify(event);
+    } catch (err) {
+      console.error(`[EventPublisher] failed to serialize ${event.event_type} event for ${event.automation_id} — MQTT publish skipped:`, err);
+      return undefined;
+    }
+  }
+
+  // Isolates listeners from each other and from the publisher — the same reliability principle
+  // applied to subscribers (e.g. the /events SSE endpoint) as to serialization above.
+  private notifyListeners(event: ObsEvent): void {
+    for (const l of this.listeners) {
+      try {
+        l(event);
+      } catch (err) {
+        console.error('[EventPublisher] listener threw, continuing:', err);
+      }
+    }
   }
 }

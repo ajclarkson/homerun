@@ -74,13 +74,17 @@ export async function runPipeline(
 
   // Step 4: Validate — safe defaults
   const actions = result.actions ?? [];
+  // Defaults to the full context object so authors get observability "for free" without
+  // hand-duplicating context fields into conditions — reduce() can still override with its
+  // own (e.g. trimmed) conditions when the full context isn't what should be published.
+  const conditions = result.conditions ?? (ctx as Record<string, unknown>);
   const decision: ObsEvent = {
     ...base,
     event_type: 'decision',
     trigger,
     decision: result.decision,
     reason: result.reason,
-    conditions: result.conditions,
+    conditions,
     actions,
     hasAction: actions.length > 0,
   };

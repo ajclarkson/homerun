@@ -92,9 +92,11 @@ interface Decision {
   decision: string;
   reason?: string;
   actions: Action[];
-  // Free-form, author-curated: the conditions that determined this decision (e.g. lux level,
-  // house mode). Distinct from `trigger` on the published event (what happened) — this is why
-  // it was allowed to happen this way.
+  // The conditions that determined this decision (e.g. lux level, house mode). Distinct from
+  // `trigger` on the published event (what happened) — this is why it was allowed to happen
+  // this way. Optional: defaults to the full context object returned by `context()` if omitted,
+  // so this is "for free" for most automations — only set it explicitly to trim or reshape what
+  // gets published (e.g. a context object holding something not worth publishing wholesale).
   conditions?: Record<string, unknown>;
 }
 ```
