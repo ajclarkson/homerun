@@ -123,14 +123,14 @@ describe('testAutomation', () => {
       reduce: ({ lights, labels, areaEntities }) => ({
         decision: 'ok',
         actions: [],
-        inputs: { lights, labels, areaEntities },
+        conditions: { lights, labels, areaEntities },
       }),
     });
 
     const result = testAutomation(automation, { event: onStartEvent });
-    expect(result.inputs?.lights).toEqual([]);
-    expect(result.inputs?.labels).toEqual([]);
-    expect(result.inputs?.areaEntities).toEqual([]);
+    expect(result.conditions?.lights).toEqual([]);
+    expect(result.conditions?.labels).toEqual([]);
+    expect(result.conditions?.areaEntities).toEqual([]);
   });
 
   it('accepts custom ha context overrides', () => {
@@ -140,7 +140,7 @@ describe('testAutomation', () => {
       subsystem: 'test',
       triggers: [{ type: 'on_start' }],
       context: (_state, ha) => ({ lights: ha.entitiesByLabel('lights') }),
-      reduce: ({ lights }) => ({ decision: 'ok', actions: [], inputs: { lights } }),
+      reduce: ({ lights }) => ({ decision: 'ok', actions: [], conditions: { lights } }),
     });
 
     const result = testAutomation(automation, {
@@ -148,7 +148,7 @@ describe('testAutomation', () => {
       ha: { entitiesByLabel: () => ['light.kitchen', 'light.parlour'] },
     });
 
-    expect(result.inputs?.lights).toEqual(['light.kitchen', 'light.parlour']);
+    expect(result.conditions?.lights).toEqual(['light.kitchen', 'light.parlour']);
   });
 
   it('fills in default EntityState fields for injected state entries', () => {
@@ -158,7 +158,7 @@ describe('testAutomation', () => {
       subsystem: 'test',
       triggers: [{ type: 'on_start' }],
       context: (state) => ({ entity: state('light.kitchen') }),
-      reduce: ({ entity }) => ({ decision: 'ok', actions: [], inputs: { entity } }),
+      reduce: ({ entity }) => ({ decision: 'ok', actions: [], conditions: { entity } }),
     });
 
     const result = testAutomation(automation, {
@@ -166,7 +166,7 @@ describe('testAutomation', () => {
       state: { 'light.kitchen': { state: 'on', attributes: { brightness: 200 } } },
     });
 
-    const entity = result.inputs?.entity as { entity_id: string; state: string; attributes: Record<string, unknown> };
+    const entity = result.conditions?.entity as { entity_id: string; state: string; attributes: Record<string, unknown> };
     expect(entity.entity_id).toBe('light.kitchen');
     expect(entity.state).toBe('on');
     expect(entity.attributes).toEqual({ brightness: 200 });

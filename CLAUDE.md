@@ -85,6 +85,28 @@ Unknown action types must log a warning and emit an error observability event �
 
 There's no way for the framework to detect a missing `impliesEntity` — a topic string carries no information about which HA entity, if any, mirrors it, and that mapping lives entirely in HA's own (often manual) MQTT config. Leaving it unset doesn't break anything; it just means the resulting `state_changed`, and anything that reacts to it, won't be traceable back to this automation's run.
 
+## Decision and observability events
+
+```typescript
+interface Decision {
+  decision: string;
+  reason?: string;
+  actions: Action[];
+  // The conditions that determined this decision (e.g. lux level, house mode). Distinct from
+  // `trigger` on the published event (what happened) — this is why it was allowed to happen
+  // this way. Optional: defaults to the full context object returned by `context()` if omitted,
+  // so this is "for free" for most automations — only set it explicitly to trim or reshape what
+  // gets published (e.g. a context object holding something not worth publishing wholesale).
+  conditions?: Record<string, unknown>;
+}
+```
+
+Every pipeline run publishes an `ObsEvent` (`schema: 'home.events.v2'`) to `homerun/events`, and — for `decision`/`abort` only — a retained snapshot to `homerun/{location}/{subsystem}/decision`. It's a discriminated union on `event_type`, not one flat shape:
+
+- `decision` — carries `trigger` (a trimmed summary of the real trigger — `{ type, entity_id?, to?, from?, cron?, ... }` depending on trigger type), `decision`/`reason`/`conditions` from the reducer, `actions`, and `hasAction: boolean` (framework-computed from `actions.length > 0` — filter on this, not on parsing `decision` strings, to find every decision that resulted in at least one action).
+- `abort` — carries `trigger` and `abort_kind: 'disabled' | 'unhandled_error' | 'guard'` (`'guard'` covers every author-triggered `abort()` call; `reason` on top of that is whatever string `abort()` was given).
+- `action_started` / `action_result` — one pair per action in the plan, each carrying the single `action` it's about (not an array — always exactly one). `action_result` carries `status: 'ok' | 'error'` and, on failure, `error` with the detail. Emitted as two separate wire events deliberately: a `action_started` with no matching `action_result` is itself a signal (a hung HA call, a crash mid-action).
+
 ## HAContext
 
 Passed as the second argument to every context builder. Provides synchronous access to entity registry data loaded at startup.
@@ -106,6 +128,17 @@ These are non-negotiable — the framework runs unattended and controls physical
 - **Gate on state cache readiness.** The Trigger Engine must not dispatch events until the initial state cache sync is complete after (re)connect.
 - **Hot reload must not unload on error.** A failed module load during hot reload keeps the previous version of that automation registered. A bad file push must never silently remove a running automation.
 - **Reconnect safely.** On HA WebSocket reconnect, re-sync the full state cache before resuming event delivery.
+
+## Coding style
+
+Inspired by [TigerBeetle's TIGER_STYLE.md](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md), adapted for a TypeScript automation framework — not a line-by-line port. The parts that assume a fixed-memory embedded database (no dynamic allocation after startup, no recursion, static loop bounds) don't apply here and are deliberately skipped. What does carry over:
+
+- **A side effect must never be able to break core control flow.** Observability, logging, and metrics are secondary to an automation actually running — a serialization failure or a bad listener must never prevent a real `ha.call_service`/`mqtt.publish` action from executing. See `EventPublisher.safeSerialize`/`notifyListeners` for the concrete pattern: catch at the boundary, log, keep going — never let the side channel take down the primary one.
+- **Fail loudly and close to the mistake, not silently deep in unrelated code.** Prefer an explicit `throw`/abort at the point something is actually wrong over a fallback that papers over it and surfaces a confusing symptom three layers away.
+- **Explicit, narrow error handling at trust boundaries — not broad try/catch as a reflex.** Wrap exactly where untrusted or fallible input crosses in (a reducer's return value, a network call, `JSON.stringify` on author-supplied data), not around large blocks "just in case."
+- **Keep functions and files small enough to review in one sitting.** If a function is doing two distinct jobs, split it — this codebase already tends to favor many small, named private methods over long ones (see `ActionRuntime`, `HAClient`) and that's deliberate, not incidental.
+- **Comments explain *why*, not *what*.** Well-named code already says what it does; a comment earns its place by capturing a non-obvious constraint, a rejected alternative, or the reason a workaround exists — not by restating the next line.
+- **Tests are not optional.** TDD for new framework behavior — see Development workflow below.
 
 ## Dry-run mode
 
