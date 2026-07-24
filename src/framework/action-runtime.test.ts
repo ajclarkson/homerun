@@ -296,6 +296,15 @@ describe('ActionRuntime — command ack tracking', () => {
     expect(deps.haClient.registerPendingAck).not.toHaveBeenCalled();
   });
 
+  it('skips set_value tracking when idempotent even when data.value is a number and state is HA\'s string form (#158)', async () => {
+    deps.commandAck.enabled = true;
+    deps.haClient.state.mockReturnValue({ entity_id: 'number.example', state: '21', attributes: {}, last_changed: '', last_updated: '' });
+    const rt = new ActionRuntime(deps as never);
+    const action: Action = { type: 'ha.call_service', domain: 'number', service: 'set_value', target: { entity_id: 'number.example' }, data: { value: 21 } };
+    await rt.execute([action], makeCtx());
+    expect(deps.haClient.registerPendingAck).not.toHaveBeenCalled();
+  });
+
   it('does not track media_player.join at all (#153)', async () => {
     deps.commandAck.enabled = true;
     const rt = new ActionRuntime(deps as never);
