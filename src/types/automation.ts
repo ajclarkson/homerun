@@ -42,9 +42,17 @@ export class UnavailableInputError extends Error {
   }
 }
 
+// HA's own sentinel values for "entity is registered but not producing readings" — an
+// offline zigbee device, an integration that hasn't polled yet. Distinct from the entity
+// key being absent from the state cache entirely, but the same "unavailable" in practice:
+// every real audited call site treated these three cases identically.
+const HA_UNAVAILABLE_STATES = new Set(['unavailable', 'unknown']);
+
 export function requireState(state: HAState, entityId: Parameters<HAState>[0]): string {
   const value = state(entityId)?.state;
-  if (value === undefined) throw new UnavailableInputError(String(entityId));
+  if (value === undefined || HA_UNAVAILABLE_STATES.has(value)) {
+    throw new UnavailableInputError(String(entityId));
+  }
   return value;
 }
 

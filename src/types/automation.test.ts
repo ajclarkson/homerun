@@ -106,6 +106,11 @@ describe('requireState', () => {
       expect((err as UnavailableInputError).entityId).toBe('sensor.house_active_mode');
     }
   });
+
+  it.each(['unavailable', 'unknown'])('throws UnavailableInputError when the state is HA\'s %s sentinel', (sentinel) => {
+    const state = makeState({ 'sensor.house_active_mode': { state: sentinel } });
+    expect(() => requireState(state, 'sensor.house_active_mode')).toThrow(UnavailableInputError);
+  });
 });
 
 describe('requireNumericState', () => {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { testAutomation, testAbort } from './testing.js';
-import { defineAutomation, abort } from './types/automation.js';
+import { testAutomation, testAbort, testUnavailable } from './testing.js';
+import { defineAutomation, abort, requireState } from './types/automation.js';
 import type { TriggerEvent } from './types/triggers.js';
 
 const onStartEvent: TriggerEvent = { type: 'on_start', correlation_id: 'test-cid' };
@@ -201,5 +201,49 @@ describe('testAbort', () => {
     });
 
     expect(() => testAbort(automation, { event: onStartEvent })).toThrow('expected abort but got decision: on');
+  });
+});
+
+// ---------- testUnavailable ----------
+
+describe('testUnavailable', () => {
+  it('returns the entity id when context throws UnavailableInputError', () => {
+    const automation = defineAutomation({
+      id: 'test',
+      location: 'test',
+      subsystem: 'test',
+      triggers: [{ type: 'on_start' }],
+      context: (state) => ({ mode: requireState(state, 'sensor.house_active_mode') }),
+      reduce: ({ mode }) => ({ decision: mode, actions: [] }),
+    });
+
+    expect(testUnavailable(automation, { event: onStartEvent })).toBe('sensor.house_active_mode');
+  });
+
+  it('throws when context completes normally instead of requiring unavailable input', () => {
+    const automation = defineAutomation({
+      id: 'test',
+      location: 'test',
+      subsystem: 'test',
+      triggers: [{ type: 'on_start' }],
+      context: () => ({ enabled: true }),
+      reduce: () => ({ decision: 'on', actions: [] }),
+    });
+
+    expect(() => testUnavailable(automation, { event: onStartEvent }))
+      .toThrow('expected UnavailableInputError but context() completed normally');
+  });
+
+  it('rethrows unrelated errors rather than swallowing them', () => {
+    const automation = defineAutomation({
+      id: 'test',
+      location: 'test',
+      subsystem: 'test',
+      triggers: [{ type: 'on_start' }],
+      context: () => { throw new Error('boom'); },
+      reduce: () => ({ decision: 'on', actions: [] }),
+    });
+
+    expect(() => testUnavailable(automation, { event: onStartEvent })).toThrow('boom');
   });
 });
