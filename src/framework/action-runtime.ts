@@ -43,7 +43,7 @@ export class ActionRuntime {
 
   private async runAction(action: Action, ctx: ExecutionContext): Promise<void> {
     const labels = { location: ctx.location, action_type: action.type };
-    this.deps.eventPublisher.publishActionEvent(this.makeEvent(ctx, 'action_started', action));
+    this.deps.eventPublisher.publishActionEvent(this.makeStartedEvent(ctx, action));
     this.deps.metrics?.incrementCounter('homerun_actions_dispatched_total', labels);
 
     const start = performance.now();
@@ -54,22 +54,18 @@ export class ActionRuntime {
       const duration = (performance.now() - start) / 1000;
       this.deps.metrics?.observeHistogram('homerun_action_duration_seconds', duration, labels);
       this.deps.metrics?.incrementCounter('homerun_actions_succeeded_total', labels);
-      this.deps.eventPublisher.publishActionEvent(
-        this.makeEvent(ctx, 'action_result', action, { reason: 'ok' }),
-      );
+      this.deps.eventPublisher.publishActionEvent(this.makeResultEvent(ctx, action, 'ok'));
     } catch (err) {
       const duration = (performance.now() - start) / 1000;
       this.deps.metrics?.observeHistogram('homerun_action_duration_seconds', duration, labels);
       this.deps.metrics?.incrementCounter('homerun_actions_failed_total', labels);
-      const reason =
+      const error =
         err instanceof Error
           ? err.message
           : typeof err === 'object' && err !== null
             ? safeStringify(err)
             : String(err);
-      this.deps.eventPublisher.publishActionEvent(
-        this.makeEvent(ctx, 'action_result', action, { reason }),
-      );
+      this.deps.eventPublisher.publishActionEvent(this.makeResultEvent(ctx, action, 'error', error));
     }
   }
 
@@ -105,26 +101,32 @@ export class ActionRuntime {
     }
   }
 
-  private makeEvent(
-    ctx: ExecutionContext,
-    event_type: ObsEvent['event_type'],
-    action: Action,
-    extra: Partial<ObsEvent> = {},
-  ): ObsEvent {
+  private baseFields(ctx: ExecutionContext) {
     return {
-      schema: 'home.events.v1',
+      schema: 'home.events.v2' as const,
       correlation_id: ctx.correlationId,
       root_correlation_id: ctx.rootCorrelationId ?? ctx.correlationId,
       automation_id: ctx.automationId,
       location: ctx.location,
       subsystem: ctx.subsystem,
-      event_type,
-      actions: [action],
       timestamp: new Date().toISOString(),
       ...(this.deps.dryRun ? { dry_run: true } : {}),
       ...(ctx.parentCorrelationId && { parent_correlation_id: ctx.parentCorrelationId }),
       ...(ctx.parentAutomationId && { parent_automation_id: ctx.parentAutomationId }),
-      ...extra,
+    };
+  }
+
+  private makeStartedEvent(ctx: ExecutionContext, action: Action): ObsEvent {
+    return { ...this.baseFields(ctx), event_type: 'action_started', action };
+  }
+
+  private makeResultEvent(ctx: ExecutionContext, action: Action, status: 'ok' | 'error', error?: string): ObsEvent {
+    return {
+      ...this.baseFields(ctx),
+      event_type: 'action_result',
+      action,
+      status,
+      ...(error !== undefined && { error }),
     };
   }
 }

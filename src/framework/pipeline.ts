@@ -1,5 +1,6 @@
 import type { Automation } from '../types/automation.js';
 import type { TriggerEvent } from '../types/triggers.js';
+import { summarizeTrigger } from '../types/triggers.js';
 import { isAbort } from '../types/automation.js';
 import type { HAClient } from './ha-client.js';
 import type { EventPublisher, ObsEvent } from './event-publisher.js';
@@ -27,9 +28,10 @@ export async function runPipeline(
   const correlationId = event.correlation_id;
   const rootCorrelationId = event.root_correlation_id ?? correlationId;
   const timestamp = new Date().toISOString();
+  const trigger = summarizeTrigger(event);
 
-  const base: Omit<ObsEvent, 'event_type' | 'decision' | 'reason' | 'actions' | 'inputs'> = {
-    schema: 'home.events.v1',
+  const base = {
+    schema: 'home.events.v2' as const,
     correlation_id: correlationId,
     root_correlation_id: rootCorrelationId,
     automation_id: automation.id,
@@ -43,7 +45,7 @@ export async function runPipeline(
 
   // Step 1: Enabled check
   if (automation.enabled === false) {
-    deps.eventPublisher.publishDecision({ ...base, event_type: 'abort', reason: 'disabled' });
+    deps.eventPublisher.publishDecision({ ...base, event_type: 'abort', abort_kind: 'disabled', trigger });
     return;
   }
 
@@ -52,12 +54,12 @@ export async function runPipeline(
   try {
     ctx = automation.context(haClient.state, haClient.context, event);
   } catch {
-    deps.eventPublisher.publishDecision({ ...base, event_type: 'abort', reason: 'unhandled_error' });
+    deps.eventPublisher.publishDecision({ ...base, event_type: 'abort', abort_kind: 'unhandled_error', trigger });
     return;
   }
 
   if (isAbort(ctx)) {
-    deps.eventPublisher.publishDecision({ ...base, event_type: 'abort', reason: ctx.reason });
+    deps.eventPublisher.publishDecision({ ...base, event_type: 'abort', abort_kind: 'guard', reason: ctx.reason, trigger });
     return;
   }
 
@@ -66,19 +68,25 @@ export async function runPipeline(
   try {
     result = automation.reduce(ctx);
   } catch {
-    deps.eventPublisher.publishDecision({ ...base, event_type: 'abort', reason: 'unhandled_error' });
+    deps.eventPublisher.publishDecision({ ...base, event_type: 'abort', abort_kind: 'unhandled_error', trigger });
     return;
   }
 
   // Step 4: Validate — safe defaults
   const actions = result.actions ?? [];
+  // Defaults to the full context object so authors get observability "for free" without
+  // hand-duplicating context fields into conditions — reduce() can still override with its
+  // own (e.g. trimmed) conditions when the full context isn't what should be published.
+  const conditions = result.conditions ?? (ctx as Record<string, unknown>);
   const decision: ObsEvent = {
     ...base,
     event_type: 'decision',
+    trigger,
     decision: result.decision,
     reason: result.reason,
-    inputs: result.inputs,
+    conditions,
     actions,
+    hasAction: actions.length > 0,
   };
 
   // Step 5: Fanout

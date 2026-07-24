@@ -10,7 +10,10 @@ export interface Decision {
   decision: string;
   reason?: string;
   actions: Action[];
-  inputs?: Record<string, unknown>;
+  // The conditions that determined this decision — free-form, author-curated. Distinct from
+  // `trigger` on the published ObsEvent (what happened, framework-derived): this is why it was
+  // allowed to happen this way (e.g. lux level, house mode, whether sleep mode blocked it).
+  conditions?: Record<string, unknown>;
 }
 
 // ---------- Abort ----------

@@ -28,7 +28,7 @@ function makeAutomation(overrides: Partial<Automation<unknown>> = {}): Automatio
     subsystem: 'lighting',
     triggers: [{ type: 'state_changed', entity: 'binary_sensor.parlour_sensor_motion' }],
     context: vi.fn().mockReturnValue({ lux: 40 }),
-    reduce: vi.fn().mockReturnValue({ decision: 'lights_on', actions: [], inputs: { lux: 40 } }),
+    reduce: vi.fn().mockReturnValue({ decision: 'lights_on', actions: [], conditions: { lux: 40 } }),
     ...overrides,
   };
 }
@@ -80,13 +80,41 @@ describe('runPipeline — happy path', () => {
     await runPipeline(auto, onStartEvent, ha as never, deps as never);
     const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
     expect(event).toMatchObject({
-      schema: 'home.events.v1',
+      schema: 'home.events.v2',
       automation_id: 'parlour:lighting',
       location: 'parlour',
       subsystem: 'lighting',
       event_type: 'decision',
       decision: 'lights_on',
+      conditions: { lux: 40 },
     });
+  });
+
+  it('sets hasAction: false when reduce returns no actions', async () => {
+    auto = makeAutomation({ reduce: vi.fn().mockReturnValue({ decision: 'no_action', actions: [] }) });
+    await runPipeline(auto, onStartEvent, ha as never, deps as never);
+    const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
+    expect(event.hasAction).toBe(false);
+  });
+
+  it('sets hasAction: true when reduce returns at least one action', async () => {
+    auto = makeAutomation({ reduce: vi.fn().mockReturnValue({ decision: 'ok', actions: [{ type: 'timer.cancel', timerKey: 'k' }] }) });
+    await runPipeline(auto, onStartEvent, ha as never, deps as never);
+    const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
+    expect(event.hasAction).toBe(true);
+  });
+
+  it('captures trigger summary on the decision event', async () => {
+    const stateChangedEvent: TriggerEvent = {
+      type: 'state_changed',
+      entity_id: 'light.test',
+      old_state: { entity_id: 'light.test', state: 'off', attributes: {}, last_changed: 'T', last_updated: 'T' },
+      new_state: { entity_id: 'light.test', state: 'on', attributes: {}, last_changed: 'T', last_updated: 'T' },
+      correlation_id: 'test-cid',
+    };
+    await runPipeline(auto, stateChangedEvent, ha as never, deps as never);
+    const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
+    expect(event.trigger).toEqual({ type: 'state_changed', entity_id: 'light.test', to: 'on', from: 'off' });
   });
 
   it('passes actions to actionRuntime.execute', async () => {
@@ -119,10 +147,38 @@ describe('runPipeline — happy path', () => {
   });
 });
 
+// ---------- conditions default to the context object ----------
+
+describe('runPipeline — conditions default to context', () => {
+  it('defaults conditions to the context object when reduce does not set one', async () => {
+    const deps = makeDeps();
+    const ha = makeHAClient();
+    const auto = makeAutomation({
+      context: vi.fn().mockReturnValue({ lux: 40, houseMode: 'normal' }),
+      reduce: vi.fn().mockReturnValue({ decision: 'lights_on', actions: [] }),
+    });
+    await runPipeline(auto, onStartEvent, ha as never, deps as never);
+    const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
+    expect(event.conditions).toEqual({ lux: 40, houseMode: 'normal' });
+  });
+
+  it('uses the explicit conditions from reduce when provided, not the raw context', async () => {
+    const deps = makeDeps();
+    const ha = makeHAClient();
+    const auto = makeAutomation({
+      context: vi.fn().mockReturnValue({ lux: 40, internalOnly: 'noise' }),
+      reduce: vi.fn().mockReturnValue({ decision: 'lights_on', actions: [], conditions: { lux: 40 } }),
+    });
+    await runPipeline(auto, onStartEvent, ha as never, deps as never);
+    const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
+    expect(event.conditions).toEqual({ lux: 40 });
+  });
+});
+
 // ---------- Disabled automation ----------
 
 describe('runPipeline — disabled automation', () => {
-  it('publishes abort with reason disabled and skips context and reduce', async () => {
+  it('publishes abort with abort_kind disabled and skips context and reduce', async () => {
     const deps = makeDeps();
     const ha = makeHAClient();
     const auto = makeAutomation({ enabled: false });
@@ -131,7 +187,7 @@ describe('runPipeline — disabled automation', () => {
     expect(auto.reduce).not.toHaveBeenCalled();
     const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
     expect(event.event_type).toBe('abort');
-    expect(event.reason).toBe('disabled');
+    expect(event.abort_kind).toBe('disabled');
   });
 
   it('runs normally when enabled is true', async () => {
@@ -166,6 +222,7 @@ describe('runPipeline — abort from context', () => {
     expect(auto.reduce).not.toHaveBeenCalled();
     const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
     expect(event.event_type).toBe('abort');
+    expect(event.abort_kind).toBe('guard');
     expect(event.reason).toBe('guard_failed');
   });
 
@@ -188,7 +245,7 @@ describe('runPipeline — exception in context', () => {
     await runPipeline(auto, onStartEvent, ha as never, deps as never);
     const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
     expect(event.event_type).toBe('abort');
-    expect(event.reason).toBe('unhandled_error');
+    expect(event.abort_kind).toBe('unhandled_error');
   });
 
   it('does not affect other pipeline invocations', async () => {
@@ -217,7 +274,7 @@ describe('runPipeline — exception in reduce', () => {
     await runPipeline(auto, onStartEvent, ha as never, deps as never);
     const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
     expect(event.event_type).toBe('abort');
-    expect(event.reason).toBe('unhandled_error');
+    expect(event.abort_kind).toBe('unhandled_error');
   });
 });
 

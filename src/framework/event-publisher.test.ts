@@ -17,17 +17,21 @@ function callForTopic(mqtt: MockMqtt, topic: string): unknown[] | undefined {
 
 function makeDecisionEvent(overrides: Partial<ObsEvent> = {}): ObsEvent {
   return {
-    schema: 'home.events.v1',
+    schema: 'home.events.v2',
     correlation_id: 'abc-123',
+    root_correlation_id: 'abc-123',
     automation_id: 'parlour:lighting',
     location: 'parlour',
     subsystem: 'lighting',
     event_type: 'decision',
+    trigger: { type: 'on_start' },
     decision: 'lights_on',
-    inputs: { lux: 40 },
+    conditions: { lux: 40 },
+    actions: [],
+    hasAction: false,
     timestamp: new Date().toISOString(),
     ...overrides,
-  };
+  } as ObsEvent;
 }
 
 // ---------- Tests ----------
@@ -48,7 +52,7 @@ describe('EventPublisher — publishDecision', () => {
     const call = callForTopic(mqtt, 'homerun/events')!;
     expect(call[0]).toBe('homerun/events');
     expect(call[2]).toMatchObject({ retain: false });
-    expect(JSON.parse(call[1] as string)).toMatchObject({ schema: 'home.events.v1', location: 'parlour' });
+    expect(JSON.parse(call[1] as string)).toMatchObject({ schema: 'home.events.v2', location: 'parlour' });
   });
 
   it('publishes the event retained to homerun/{location}/{subsystem}/decision', async () => {
@@ -65,7 +69,7 @@ describe('EventPublisher — publishDecision', () => {
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalledTimes(2));
 
     const call = callForTopic(mqtt, 'homerun/parlour/lighting/decision')!;
-    expect(JSON.parse(call[1] as string).schema).toBe('home.events.v1');
+    expect(JSON.parse(call[1] as string).schema).toBe('home.events.v2');
   });
 
   it('routes dry_run events to homerun/dev/* topics', async () => {
@@ -82,6 +86,34 @@ describe('EventPublisher — publishDecision', () => {
     mqtt.publishAsync.mockRejectedValue(new Error('connection lost'));
     expect(() => publisher.publishDecision(makeDecisionEvent())).not.toThrow();
     await new Promise((r) => setTimeout(r, 0));
+  });
+
+  it('does not throw when the event contains a value JSON.stringify cannot serialize', () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const event = makeDecisionEvent({ conditions: circular });
+    expect(() => publisher.publishDecision(event)).not.toThrow();
+    expect(mqtt.publishAsync).not.toHaveBeenCalled();
+  });
+
+  it('still notifies listeners when the event fails to serialize', () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const event = makeDecisionEvent({ conditions: circular });
+    const listener = vi.fn();
+    publisher.subscribe(listener);
+    publisher.publishDecision(event);
+    expect(listener).toHaveBeenCalledWith(event);
+  });
+
+  it('does not let one throwing listener prevent another listener or the MQTT publish', () => {
+    const throwingListener = vi.fn(() => { throw new Error('listener bug'); });
+    const healthyListener = vi.fn();
+    publisher.subscribe(throwingListener);
+    publisher.subscribe(healthyListener);
+    expect(() => publisher.publishDecision(makeDecisionEvent())).not.toThrow();
+    expect(healthyListener).toHaveBeenCalledOnce();
+    expect(mqtt.publishAsync).toHaveBeenCalled();
   });
 });
 

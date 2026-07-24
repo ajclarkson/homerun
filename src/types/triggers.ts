@@ -41,3 +41,46 @@ export type TriggerEvent = TriggerEventBase & (
   | { type: 'button'; entity_id: string; gesture: 'single_press' | 'double_press' | 'hold'; button?: string }
   | { type: 'mqtt_in'; topic: string; payload: string }
 );
+
+// ---------- Trigger summary ----------
+// A trimmed, observability-facing projection of TriggerEvent — published on ObsEvent's
+// decision/abort events so "what happened" is structurally queryable instead of every
+// automation hand-reconstructing it into their own free-form `conditions`. Deliberately
+// excludes full EntityState (attributes can be large/variable) and mqtt_in's payload
+// (can be large, not meant for logs by default) — that detail still belongs in `conditions`
+// if an automation's own logic depends on it. See #28, #141.
+
+export type TriggerSummary =
+  | { type: 'state_changed'; entity_id: string; to: string; from?: string }
+  | { type: 'schedule'; cron: string }
+  | { type: 'on_start' }
+  | { type: 'timer_expired'; timerKey: string }
+  | { type: 'button'; entity_id: string; gesture: 'single_press' | 'double_press' | 'hold'; button?: string }
+  | { type: 'mqtt_in'; topic: string };
+
+export function summarizeTrigger(event: TriggerEvent): TriggerSummary {
+  switch (event.type) {
+    case 'state_changed':
+      return {
+        type: 'state_changed',
+        entity_id: event.entity_id,
+        to: event.new_state.state,
+        ...(event.old_state && { from: event.old_state.state }),
+      };
+    case 'schedule':
+      return { type: 'schedule', cron: event.cron };
+    case 'on_start':
+      return { type: 'on_start' };
+    case 'timer_expired':
+      return { type: 'timer_expired', timerKey: event.timerKey };
+    case 'button':
+      return {
+        type: 'button',
+        entity_id: event.entity_id,
+        gesture: event.gesture,
+        ...(event.button !== undefined && { button: event.button }),
+      };
+    case 'mqtt_in':
+      return { type: 'mqtt_in', topic: event.topic };
+  }
+}

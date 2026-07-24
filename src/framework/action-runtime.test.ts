@@ -59,14 +59,15 @@ describe('ActionRuntime — ha.call_service', () => {
     expect(calls).toEqual(['action_started', 'action_result']);
   });
 
-  it('action_result carries reason: ok on success', async () => {
+  it('action_result carries status: ok on success', async () => {
     const rt = new ActionRuntime(deps as never);
     await rt.execute([{ type: 'ha.call_service', domain: 'light', service: 'turn_off' }], makeCtx());
-    const result = deps.eventPublisher.publishActionEvent.mock.calls[1][0] as { reason: string };
-    expect(result.reason).toBe('ok');
+    const result = deps.eventPublisher.publishActionEvent.mock.calls[1][0] as { status: string; error?: string };
+    expect(result.status).toBe('ok');
+    expect(result.error).toBeUndefined();
   });
 
-  it('action_result carries error detail on failure; subsequent actions still run', async () => {
+  it('action_result carries status: error and error detail on failure; subsequent actions still run', async () => {
     deps.haClient.callService.mockRejectedValueOnce(new Error('HA unavailable'));
     const rt = new ActionRuntime(deps as never);
     const actions: Action[] = [
@@ -74,10 +75,20 @@ describe('ActionRuntime — ha.call_service', () => {
       { type: 'timer.cancel', timerKey: 'parlour:lighting:off-delay' },
     ];
     await rt.execute(actions, makeCtx());
-    const result = deps.eventPublisher.publishActionEvent.mock.calls[1][0] as { event_type: string; reason: string };
+    const result = deps.eventPublisher.publishActionEvent.mock.calls[1][0] as { event_type: string; status: string; error?: string };
     expect(result.event_type).toBe('action_result');
-    expect(result.reason).toContain('HA unavailable');
+    expect(result.status).toBe('error');
+    expect(result.error).toContain('HA unavailable');
     expect(deps.timerManager.cancel).toHaveBeenCalled();
+  });
+
+  it('action_started/action_result carry the singular action, not an array', async () => {
+    const rt = new ActionRuntime(deps as never);
+    const action: Action = { type: 'ha.call_service', domain: 'light', service: 'turn_off' };
+    await rt.execute([action], makeCtx());
+    const [started, result] = deps.eventPublisher.publishActionEvent.mock.calls.map((c: unknown[]) => c[0] as Record<string, unknown>);
+    expect(started.action).toEqual(action);
+    expect(result.action).toEqual(action);
   });
 });
 
@@ -145,9 +156,10 @@ describe('ActionRuntime — unknown action type', () => {
     const deps = makeDeps();
     const rt = new ActionRuntime(deps as never);
     await rt.execute([{ type: 'unknown.action' } as never], makeCtx());
-    const result = deps.eventPublisher.publishActionEvent.mock.calls[1][0] as { event_type: string; reason: string };
+    const result = deps.eventPublisher.publishActionEvent.mock.calls[1][0] as { event_type: string; status: string; error?: string };
     expect(result.event_type).toBe('action_result');
-    expect(result.reason).toContain('unknown.action');
+    expect(result.status).toBe('error');
+    expect(result.error).toContain('unknown.action');
   });
 });
 
@@ -261,7 +273,7 @@ describe('ActionRuntime — event publisher fields', () => {
     await rt.execute([{ type: 'ha.call_service', domain: 'climate', service: 'set_temperature' }], ctx);
     const started = deps.eventPublisher.publishActionEvent.mock.calls[0][0] as Record<string, unknown>;
     expect(started).toMatchObject({
-      schema: 'home.events.v1',
+      schema: 'home.events.v2',
       correlation_id: 'cid-99',
       automation_id: 'bedroom:heating',
       location: 'bedroom',
