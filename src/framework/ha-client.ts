@@ -90,8 +90,11 @@ interface PendingAck extends AckOrigin {
 }
 
 function ackSatisfied(expected: Record<string, unknown>, state: EntityState): boolean {
+  // HA represents every entity's state as a string, even numeric domains (number,
+  // input_number, ...) — a dispatched call's data.value is typically a plain JS number, so
+  // comparing `state` with strict equality never matches regardless of what HA does. See #158.
   return Object.entries(expected).every(([key, value]) =>
-    key === 'state' ? state.state === value : state.attributes[key] === value,
+    key === 'state' ? String(state.state) === String(value) : state.attributes[key] === value,
   );
 }
 

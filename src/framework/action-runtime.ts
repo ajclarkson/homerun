@@ -85,8 +85,10 @@ function computeExpectedAck(
 
   if (Object.keys(expected).length === 0) return undefined;
 
+  // See ha-client.ts's ackSatisfied for why `state` needs string coercion (#158) — the same
+  // number-vs-string gap applies here to the idempotency pre-check.
   const alreadySatisfied = Object.entries(expected).every(([key, value]) =>
-    key === 'state' ? current?.state === value : current?.attributes[key] === value,
+    key === 'state' ? current !== undefined && String(current.state) === String(value) : current?.attributes[key] === value,
   );
   if (alreadySatisfied) return undefined;
 

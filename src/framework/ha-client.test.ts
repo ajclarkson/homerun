@@ -518,6 +518,39 @@ describe('HAClient', () => {
         vi.useRealTimers();
       }
     });
+
+    it('matches a numeric expected state against HA\'s string state representation (#158)', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        const { client } = await connectAndInitialise({
+          'number.example': makeEntity('20', 'T1'),
+        });
+
+        const timeouts: unknown[] = [];
+        client.on('action_ack_timeout', (e) => timeouts.push(e));
+
+        client.registerPendingAck('number.example', {
+          correlationId: 'A',
+          rootCorrelationId: 'A',
+          automationId: 'kitchen:room_temp_feed',
+          location: 'kitchen',
+          subsystem: 'heating',
+          action: { type: 'ha.call_service', domain: 'number', service: 'set_value', target: { entity_id: 'number.example' }, data: { value: 21 } },
+          expected: { state: 21 },
+        }, 8000);
+
+        // HA reports the new state as a string, even though the dispatched value was a number.
+        capturedSubscribeCallback!(snapshot({
+          'number.example': makeEntity('21', 'T2'),
+        }));
+
+        vi.advanceTimersByTime(8001);
+
+        expect(timeouts).toHaveLength(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe('reconnect', () => {
