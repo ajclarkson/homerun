@@ -39,21 +39,42 @@ function safeStringify(err: object): string {
 // These are the known exceptions: call parameters that don't name a resulting attribute.
 const NON_ATTRIBUTE_DATA_KEYS = new Set(['transition', 'entity_id']);
 
+// `set_value` on these domains sets the entity's top-level `state` directly — unlike most
+// services, where a `data` key names the attribute it ends up on, these have no attribute
+// called `value` at all. Found the hard way (#153): computeExpectedAck's generic convention
+// falsely flagged every number/input_text room-sensor feed call as an ack timeout, since
+// `attributes.value` never existed to satisfy.
+const SET_VALUE_TO_STATE_DOMAINS = new Set(['number', 'input_number', 'input_text', 'input_select', 'text']);
+
+// Domains/services excluded from tracking entirely rather than guessing at a convention that
+// doesn't hold cleanly — group membership attributes don't reliably come back as an exact
+// match of what was passed (ordering, or reflecting the whole group rather than the delta).
+const UNTRACKED_SERVICES = new Set(['media_player.join', 'media_player.unjoin']);
+
 // Computes the field/attribute -> value map a dispatched call is expected to produce, or
-// undefined if there's nothing to track (no inferable fields, or the entity already matches
-// every one of them — an idempotent call that legitimately produces no state_changed at all).
-// See #55's design discussion for why this is convention-based rather than a per-service table.
+// undefined if there's nothing to track (no inferable fields, an excluded service, or the
+// entity already matches every expected field — an idempotent call that legitimately produces
+// no state_changed at all). See #55's design discussion for why this is convention-based
+// rather than a per-service table.
 function computeExpectedAck(
   action: HaCallServiceAction,
   current: EntityState | undefined,
 ): Record<string, unknown> | undefined {
+  if (UNTRACKED_SERVICES.has(`${action.domain}.${action.service}`)) return undefined;
+
   const expected: Record<string, unknown> = {};
 
-  if (action.service === 'turn_on') expected.state = 'on';
-  else if (action.service === 'turn_off') expected.state = 'off';
+  if (action.service === 'turn_on') {
+    expected.state = 'on';
+  } else if (action.service === 'turn_off') {
+    expected.state = 'off';
+  } else if (action.service === 'set_value' && SET_VALUE_TO_STATE_DOMAINS.has(action.domain) && action.data?.value !== undefined) {
+    expected.state = action.data.value;
+  }
 
   for (const [key, value] of Object.entries(action.data ?? {})) {
     if (NON_ATTRIBUTE_DATA_KEYS.has(key)) continue;
+    if ('state' in expected && key === 'value' && SET_VALUE_TO_STATE_DOMAINS.has(action.domain)) continue;
     expected[key] = value;
   }
 
