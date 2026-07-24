@@ -129,6 +129,17 @@ These are non-negotiable — the framework runs unattended and controls physical
 - **Hot reload must not unload on error.** A failed module load during hot reload keeps the previous version of that automation registered. A bad file push must never silently remove a running automation.
 - **Reconnect safely.** On HA WebSocket reconnect, re-sync the full state cache before resuming event delivery.
 
+## Coding style
+
+Inspired by [TigerBeetle's TIGER_STYLE.md](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md), adapted for a TypeScript automation framework — not a line-by-line port. The parts that assume a fixed-memory embedded database (no dynamic allocation after startup, no recursion, static loop bounds) don't apply here and are deliberately skipped. What does carry over:
+
+- **A side effect must never be able to break core control flow.** Observability, logging, and metrics are secondary to an automation actually running — a serialization failure or a bad listener must never prevent a real `ha.call_service`/`mqtt.publish` action from executing. See `EventPublisher.safeSerialize`/`notifyListeners` for the concrete pattern: catch at the boundary, log, keep going — never let the side channel take down the primary one.
+- **Fail loudly and close to the mistake, not silently deep in unrelated code.** Prefer an explicit `throw`/abort at the point something is actually wrong over a fallback that papers over it and surfaces a confusing symptom three layers away.
+- **Explicit, narrow error handling at trust boundaries — not broad try/catch as a reflex.** Wrap exactly where untrusted or fallible input crosses in (a reducer's return value, a network call, `JSON.stringify` on author-supplied data), not around large blocks "just in case."
+- **Keep functions and files small enough to review in one sitting.** If a function is doing two distinct jobs, split it — this codebase already tends to favor many small, named private methods over long ones (see `ActionRuntime`, `HAClient`) and that's deliberate, not incidental.
+- **Comments explain *why*, not *what*.** Well-named code already says what it does; a comment earns its place by capturing a non-obvious constraint, a rejected alternative, or the reason a workaround exists — not by restating the next line.
+- **Tests are not optional.** TDD for new framework behavior — see Development workflow below.
+
 ## Dry-run mode
 
 `DRY_RUN=true` causes the action runtime to log actions rather than execute them. The full pipeline runs — context, reduce, observability — but `ha.call_service` and `mqtt.publish` are no-ops. This is the default for local development and must be built in from the start.
