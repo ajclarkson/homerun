@@ -312,6 +312,14 @@ describe('ActionRuntime — command ack tracking', () => {
     expect(deps.haClient.registerPendingAck).not.toHaveBeenCalled();
   });
 
+  it('does not track scene.turn_on at all — a scene entity state is a last-activated timestamp, not on/off (#156)', async () => {
+    deps.commandAck.enabled = true;
+    const rt = new ActionRuntime(deps as never);
+    const action: Action = { type: 'ha.call_service', domain: 'scene', service: 'turn_on', target: { entity_id: 'scene.example_off' }, data: { transition: 0.5 } };
+    await rt.execute([action], makeCtx());
+    expect(deps.haClient.registerPendingAck).not.toHaveBeenCalled();
+  });
+
   it('skips tracking when the entity already matches every expected field (idempotent)', async () => {
     deps.commandAck.enabled = true;
     deps.haClient.state.mockReturnValue({ entity_id: 'light.example', state: 'on', attributes: {}, last_changed: '', last_updated: '' });
