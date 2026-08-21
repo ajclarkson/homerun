@@ -255,8 +255,11 @@ export class HAClient extends EventEmitter {
       const old_state = this.stateCache.get(id);
       const new_state = toEntityState(id, rawEntity);
 
-      // last_updated changes whenever state or attributes change in HA.
-      if (!old_state || old_state.last_updated !== new_state.last_updated) {
+      // last_updated changes whenever state or attributes change in HA. It's also compared as
+      // a millisecond-precision string (see toEntityState), so two distinct state changes to
+      // the same entity within the same millisecond collide on last_updated alone — compare
+      // state directly too so a genuine transition is never silently dropped. See #170.
+      if (!old_state || old_state.state !== new_state.state || old_state.last_updated !== new_state.last_updated) {
         this.stateCache.set(id, new_state);
 
         const ack = this.pendingAcks.get(id);
