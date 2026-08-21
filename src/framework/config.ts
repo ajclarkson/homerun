@@ -14,6 +14,8 @@ function isSecretRef(v: unknown): v is SecretRef {
 const secretTag = defineScalarTag<SecretRef>('!secret', {
   implicit: false,
   resolve: (source) => ({ __secret: source }),
+  // Load-only tag — config is never dumped back to YAML, so identify() is unreachable.
+  identify: () => false,
 });
 
 const SCHEMA_WITH_SECRET = CORE_SCHEMA.withTags(secretTag);
