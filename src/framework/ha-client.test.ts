@@ -172,6 +172,28 @@ describe('HAClient', () => {
       expect(changes).toHaveLength(0);
     });
 
+    it('emits state_changed for a genuine state change even when last_updated collides (#170)', async () => {
+      // last_updated is millisecond-precision (see toEntityState), so two real transitions
+      // to the same entity within the same millisecond can arrive with an identical string —
+      // e.g. zone.home going 2 -> 1 -> 0 as two people leave within microseconds of each other.
+      // The state itself must still be trusted over the (lossy) timestamp.
+      const { client } = await connectAndInitialise({
+        'zone.home': makeEntity('1', '2024-01-01T00:00:00.794Z'),
+      });
+
+      const changes: StateChangedEvent[] = [];
+      client.on('state_changed', (e) => changes.push(e));
+
+      capturedSubscribeCallback!(snapshot({
+        'zone.home': makeEntity('0', '2024-01-01T00:00:00.794Z'),
+      }));
+
+      expect(changes).toHaveLength(1);
+      expect(changes[0].old_state?.state).toBe('1');
+      expect(changes[0].new_state.state).toBe('0');
+      expect(client.state('zone.home')?.state).toBe('0');
+    });
+
     it('emits state_changed with undefined old_state for a new entity', async () => {
       const { client } = await connectAndInitialise({});
 
