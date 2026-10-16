@@ -815,6 +815,42 @@ describe('HAClient', () => {
         'entity_registry_updated',
       );
     });
+
+    it('coalesces a burst of entity_registry_updated events into one in-flight reload plus one trailing retry', async () => {
+      let resolveFirstReload!: (entries: Array<{ entity_id: string; labels?: string[] }>) => void;
+      const firstReload = new Promise<Array<{ entity_id: string; labels?: string[] }>>((resolve) => {
+        resolveFirstReload = resolve;
+      });
+
+      (mockConnection.sendMessagePromise as Mock)
+        .mockResolvedValueOnce([{ entity_id: 'light.a', labels: ['old_label'] }]) // initial load on connect
+        .mockImplementationOnce(() => firstReload) // first burst-triggered reload — stays in flight
+        .mockResolvedValueOnce([{ entity_id: 'light.a', labels: ['final_label'] }]); // trailing retry
+
+      const { client } = await connectClient();
+      capturedSubscribeCallback!(snapshot({ 'light.a': makeEntity('on', 'T1') }));
+      await client.ready;
+
+      // A burst of events arrives before the first reload resolves.
+      capturedRegistryUpdatedCallback!();
+      capturedRegistryUpdatedCallback!();
+      capturedRegistryUpdatedCallback!();
+      capturedRegistryUpdatedCallback!();
+
+      // Only the connect-time load and the single in-flight reload should have
+      // started — the other 3 events must coalesce into one pending retry, not
+      // 3 additional concurrent config/entity_registry/list fetches.
+      expect(mockConnection.sendMessagePromise).toHaveBeenCalledTimes(2);
+
+      resolveFirstReload([{ entity_id: 'light.a', labels: ['old_label'] }]);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      // Exactly one trailing retry ran after the burst settled, reflecting the
+      // final state rather than being dropped.
+      expect(mockConnection.sendMessagePromise).toHaveBeenCalledTimes(3);
+      expect(client.context.labelsFor('light.a')).toEqual(['final_label']);
+    });
   });
 
   describe('disconnect', () => {

@@ -132,6 +132,14 @@ export class HAClient extends EventEmitter {
   // During this window we repopulate silently — no state_changed events emitted.
   private reconnecting = false;
 
+  // Coalesces concurrent registry reload requests into a single in-flight
+  // loadEntityRegistry() call plus at most one trailing retry. Without this,
+  // a burst of entity_registry_updated events (HA can fire many in a row for
+  // a single bulk edit) each start their own full config/entity_registry/list
+  // fetch, and N of those in flight at once multiplies memory use by N — see #172.
+  private registryReloadInFlight: Promise<void> | null = null;
+  private registryReloadPending = false;
+
   private _readyResolve!: () => void;
   readonly ready: Promise<void> = new Promise((resolve) => {
     this._readyResolve = resolve;
@@ -208,13 +216,7 @@ export class HAClient extends EventEmitter {
 
     this.connection.subscribeEvents(() => {
       console.log('[ha-client] entity_registry_updated received — reloading registry');
-      this.loadEntityRegistry()
-        .then(() => {
-          console.log(`[ha-client] registry reloaded (${this.labelToEntities.size} labels, ${this.areaToEntities.size} areas)`);
-        })
-        .catch((err) => {
-          console.error('[ha-client] registry reload failed after entity_registry_updated:', err);
-        });
+      this.requestRegistryReload();
     }, 'entity_registry_updated').catch((err) => {
       console.error('[ha-client] failed to subscribe to entity_registry_updated:', err);
     });
@@ -230,9 +232,7 @@ export class HAClient extends EventEmitter {
       } else if (this.reconnecting) {
         this.reconnecting = false;
         // Reload registry in the background — don't block the cache repopulate.
-        this.loadEntityRegistry().catch((err) => {
-          console.error('[ha-client] registry reload failed after reconnect:', err);
-        });
+        this.requestRegistryReload();
         this.repopulateCache(entities);
         this.emit('reconnected');
       } else {
@@ -288,6 +288,29 @@ export class HAClient extends EventEmitter {
         this.stateCache.delete(id);
       }
     }
+  }
+
+  // Coalescing entry point for registry reloads — see registryReloadInFlight
+  // field comment. Never throws; loadEntityRegistry failures are logged and
+  // swallowed here so a connection hiccup can't surface as an unhandled rejection.
+  private requestRegistryReload(): void {
+    if (this.registryReloadInFlight) {
+      this.registryReloadPending = true;
+      return;
+    }
+
+    this.registryReloadInFlight = (async () => {
+      do {
+        this.registryReloadPending = false;
+        try {
+          await this.loadEntityRegistry();
+          console.log(`[ha-client] registry reloaded (${this.labelToEntities.size} labels, ${this.areaToEntities.size} areas)`);
+        } catch (err) {
+          console.error('[ha-client] registry reload failed:', err);
+        }
+      } while (this.registryReloadPending);
+      this.registryReloadInFlight = null;
+    })();
   }
 
   private async loadEntityRegistry(): Promise<void> {
