@@ -4,7 +4,7 @@
 
 Homerun is a TypeScript framework for Home Assistant automation. It enforces a typed, testable pattern: context builder + pure reducer + declarative actions. Designed to be published as `@ajclarkson/homerun`.
 
-This repository contains the framework only — no automations, no household-specific configuration, no entity names. Those live in a separate `homerun-automations` repo, which is public — keep that in mind when writing anything there (issues, PRs, commits) too.
+This repository contains the framework only — no automations, no household-specific configuration, no entity names. Consumers keep their automations in their own repo and depend on this package. Everything written here (code, docs, issues, PRs, commits) is public.
 
 ## What this is not
 
@@ -13,7 +13,7 @@ This repo should never contain:
 - Real entity IDs, room names, or household configuration
 - HA credentials or environment-specific URLs
 
-If you find yourself wanting to reference specific entities or rooms while working here, that's a signal to step back to the design docs first.
+If you find yourself wanting to reference specific entities or rooms while working here, use a generic placeholder (`sensor.example`) instead.
 
 ## Architecture
 
@@ -38,6 +38,18 @@ Per-component detail is in the code; the public API and event schema are in `doc
 
 - `docs/api.md`: automation API, trigger and action types, `requireState()`, `HAContext`, testing helpers. Read before changing anything public.
 - `docs/observability.md`: `ObsEvent` schema (`home.events.v2`), `commandAck`, MQTT topics, Prometheus vs `ObsEvent`. Read before changing events or metrics.
+- `README.md`: overview, quick start, and the HTTP API (health, automations, reload, `/events` stream).
+
+## Commands
+
+```bash
+npm run dev            # run from source, hot-reloads automations (DRY_RUN is the safe default)
+npm run build          # tsc
+npm test               # vitest, watch mode
+npm run test:run       # vitest, single run (use before committing)
+npm run generate:ha-types      # generate entity types from a live HA instance
+npm run generate:ha-services   # generate typed service helpers
+```
 
 ## Reliability requirements
 
@@ -101,10 +113,10 @@ it('returns no_action when disabled', () => {
 
 `HAState` in tests is a plain function: `(entity: string) => mockValues[entity]`.
 
-## Consumer repo
+## Consumers
 
-Automations live in a separate consumer repo (`homerun-automations`, public). It depends on this package via a local file link (`"@ajclarkson/homerun": "file:../homerun"`). The `homerun-generate-ha-types` bin is invoked from there as `npm run codegen`.
+Consumers depend on this package and run the `homerun-generate-ha-types` and `homerun-generate-ha-services` bins to generate types from their own HA instance. Anything exported from `src/lib.ts` or `src/testing.ts` is public API.
 
-## Current state
+## Roadmap
 
-The full bootstrap is running. The framework is in active development — remaining work is tracked as [GitHub issues](https://github.com/ajclarkson/homerun/issues).
+Remaining work is tracked as [GitHub issues](https://github.com/ajclarkson/homerun/issues).
