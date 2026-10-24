@@ -38,6 +38,7 @@ Per-component detail is in the code; the public API and event schema are in `doc
 
 - `docs/api.md`: automation API, trigger and action types, `requireState()`, `HAContext`, testing helpers. Read before changing anything public.
 - `docs/observability.md`: `ObsEvent` schema (`home.events.v2`), `commandAck`, MQTT topics, Prometheus vs `ObsEvent`. Read before changing events or metrics.
+- `docs/consumers.md`: how a consumer repo is set up: install, layout, type generation, config, running. Read when changing the loader, config, bins or packaging.
 - `README.md`: overview, quick start, and the HTTP API (health, automations, reload, `/events` stream).
 
 ## Commands
@@ -74,18 +75,13 @@ Inspired by [TigerBeetle's TIGER_STYLE.md](https://github.com/tigerbeetle/tigerb
 
 ## Dry-run mode
 
-`DRY_RUN=true` causes the action runtime to log actions rather than execute them. The full pipeline runs — context, reduce, observability — but `ha.call_service` and `mqtt.publish` are no-ops. This is the default for local development and must be built in from the start.
+`options.dry_run: true` in the config causes the action runtime to log actions rather than execute them. The full pipeline runs — context, reduce, observability — but `ha.call_service` and `mqtt.publish` are no-ops. Dry-run events go to `homerun/dev/*` topics. Use it for local development.
 
-## Environment variables
+## Configuration
 
-| Variable | Purpose |
-|----------|---------|
-| `HA_URL` | Home Assistant base URL |
-| `HA_TOKEN` | Long-lived access token |
-| `MQTT_URL` | MQTT broker URL |
-| `AUTOMATIONS_DIR` | Path to automation files (watched by hot reload) |
-| `DRY_RUN` | Set to `true` to disable action execution |
-| `AUTOMATION` | Scope hot reload to a single file (optional, dev only) |
+The runtime reads `configuration.yaml` (path from `HOMERUN_CONFIG`, default `./configuration.yaml`), with `!secret` values from a `secrets.yaml` beside it. Schema and defaults: `src/framework/config.ts`; annotated example: `configuration.yaml.example`.
+
+Environment variables are few: `HOMERUN_CONFIG` (config path), `AUTOMATION` (dev only: scope hot reload to one file), and `HA_URL`/`HA_TOKEN` (used only by the type and service generators).
 
 ## Development workflow
 
@@ -115,7 +111,7 @@ it('returns no_action when disabled', () => {
 
 ## Consumers
 
-Consumers depend on this package and run the `homerun-generate-ha-types` and `homerun-generate-ha-services` bins to generate types from their own HA instance. Anything exported from `src/lib.ts` or `src/testing.ts` is public API.
+A consumer is a repo that depends on this package, holds its automations, and runs the runtime (see `docs/consumers.md`). Anything exported from `src/lib.ts` or `src/testing.ts` is public API.
 
 ## Roadmap
 
