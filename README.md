@@ -2,7 +2,7 @@
 
 **Typed, testable Home Assistant automations in TypeScript.**
 
-> **Status: early development.** The framework is not yet published to npm and the API is not stable. This README documents the intended design; some parts are still being built.
+> **Status: pre-1.0.** The API may change. Builds are published to npm as `@ajclarkson/homerun` (`edge` tag, on every push to `main`) and as a Docker image, `ghcr.io/ajclarkson/homerun:edge`.
 
 Homerun is a framework that replaces HA automations and Node-RED flows with pure functions. Every automation is a context builder and a reducer — no side effects, no hidden state, no YAML. The pipeline handles observability, error isolation, and action execution.
 
@@ -24,53 +24,50 @@ Every automation follows the same pipeline:
 Event → context() → reduce() → actions[]
 ```
 
-**`context()`** reads from the HA state cache and returns a typed snapshot — or aborts early if the guard condition isn't met. It is the only place that touches external state.
+**`context()`** reads from the HA state cache and returns a typed snapshot — or aborts early if a required input is missing. It is the only place that touches external state.
 
 **`reduce()`** is a pure function. It receives the context and returns a decision with a list of declarative actions. No async, no side effects, no HA calls.
 
-**The pipeline** handles everything else: correlation IDs, observability snapshots, error isolation, and action execution.
+**The pipeline** handles everything else: correlation IDs, observability events, error isolation, and action execution.
 
 ---
 
 ## Example
 
 ```typescript
-import { defineAutomation, abort } from './src/types/automation.js';
+import { defineAutomation, abort, requireState, requireNumericState } from '@ajclarkson/homerun';
 
-export const kitchenLights = defineAutomation({
+export default defineAutomation({
   id: 'kitchen:lighting',
   location: 'kitchen',
   subsystem: 'lighting',
 
   triggers: [
     { type: 'state_changed', entity: 'binary_sensor.kitchen_motion' },
-    { type: 'state_changed', entity: 'binary_sensor.kitchen_door' },
     { type: 'on_start' },
   ],
 
-  context(state, ha) {
-    const enabled = state('input_boolean.kitchen_automation_lights_enabled');
-    if (enabled?.state !== 'on') return abort('automation_disabled');
-
+  context(state) {
+    if (requireState(state, 'input_boolean.kitchen_lights_enabled') !== 'on') {
+      return abort('automation_disabled');
+    }
     return {
-      motion: state('binary_sensor.kitchen_motion')?.state === 'on',
-      lux: Number(state('sensor.kitchen_sensor_lux')?.state ?? 0),
-      luxThreshold: Number(state('input_number.kitchen_automation_lux_threshold_dark')?.state ?? 40),
+      motion: requireState(state, 'binary_sensor.kitchen_motion') === 'on',
+      lux: requireNumericState(state, 'sensor.kitchen_lux'),
+      luxThreshold: requireNumericState(state, 'input_number.kitchen_lux_threshold'),
     };
   },
 
   reduce(ctx) {
     const shouldLight = ctx.motion && ctx.lux < ctx.luxThreshold;
-
     return {
       decision: shouldLight ? 'lights_on' : 'lights_off',
-      inputs: ctx,
       actions: [
         {
           type: 'ha.call_service',
           domain: 'light',
           service: shouldLight ? 'turn_on' : 'turn_off',
-          target: { entity_id: 'light.kitchen_light_ceiling' },
+          target: { entity_id: 'light.kitchen_ceiling' },
         },
       ],
     };
@@ -78,77 +75,52 @@ export const kitchenLights = defineAutomation({
 });
 ```
 
+`requireState` and `requireNumericState` abort the run, with the missing entity recorded, if an entity is unavailable or non-numeric, so a dead sensor never silently becomes a wrong decision. The decision's `conditions` default to the full context, so the published event explains itself.
+
+Files like this go in your automations directory; see [Consumer setup](docs/consumers.md).
+
 ---
 
 ## Testing
 
-Because `reduce()` is a pure function, tests are just function calls:
+Because `reduce()` is a pure function, tests are just function calls. To test the whole automation without a Home Assistant connection, use the test helpers:
 
 ```typescript
 import { describe, it, expect } from 'vitest';
-import { kitchenLights } from './kitchen-lights';
+import { testAutomation } from '@ajclarkson/homerun/testing';
+import kitchenLights from './kitchen-lights';
 
-describe('kitchenLights reducer', () => {
-  it('turns lights on when motion is detected below lux threshold', () => {
-    const result = kitchenLights.reduce({ motion: true, lux: 20, luxThreshold: 40 });
+describe('kitchen lighting', () => {
+  it('turns lights on when motion is detected below the lux threshold', () => {
+    const result = testAutomation(kitchenLights, {
+      event: { type: 'state_changed', entity_id: 'binary_sensor.kitchen_motion', new_state: { state: 'on' } },
+      state: {
+        'input_boolean.kitchen_lights_enabled': { state: 'on' },
+        'binary_sensor.kitchen_motion': { state: 'on' },
+        'sensor.kitchen_lux': { state: '20' },
+        'input_number.kitchen_lux_threshold': { state: '40' },
+      },
+    });
     expect(result.decision).toBe('lights_on');
     expect(result.actions[0]).toMatchObject({ service: 'turn_on' });
-  });
-
-  it('turns lights off when lux is already high', () => {
-    const result = kitchenLights.reduce({ motion: true, lux: 80, luxThreshold: 40 });
-    expect(result.decision).toBe('lights_off');
-  });
-
-  it('turns lights off when motion clears', () => {
-    const result = kitchenLights.reduce({ motion: false, lux: 10, luxThreshold: 40 });
-    expect(result.decision).toBe('lights_off');
   });
 });
 ```
 
-No mocking, no HA connection, no async. The context builder can be tested separately with a plain function as the state accessor:
-
-```typescript
-const mockState = (entity: string) => ({
-  'input_boolean.kitchen_automation_lights_enabled': { state: 'on' },
-  'binary_sensor.kitchen_motion': { state: 'on' },
-  'sensor.kitchen_sensor_lux': { state: '20' },
-  'input_number.kitchen_automation_lux_threshold_dark': { state: '40' },
-})[entity] as any;
-
-const ctx = kitchenLights.context(mockState, mockHAContext);
-```
+No mocking, no HA connection, no async. `testAbort` and `testUnavailable` cover the abort paths. See [Automation API](docs/api.md).
 
 ---
 
-## Trigger types
+## Triggers and actions
 
 | Trigger | Fires when |
 |---------|-----------|
-| `state_changed` | An entity's state or attributes change. Accepts a string or `RegExp` for the entity ID. |
+| `state_changed` | An entity's state or attributes change. Filter with `to`; delay with `duration`. |
 | `schedule` | A cron expression fires. |
 | `on_start` | The system is ready and the state cache is fully populated. |
 | `timer_expired` | A named timer set by a previous `timer.start` action expires. |
-| `button` | A Zigbee button entity emits a `single_press`, `double_press`, or `hold` gesture. |
+| `button` | A button entity emits a `single_press`, `double_press`, or `hold` gesture. |
 | `mqtt_in` | A message arrives on a subscribed MQTT topic. |
-
-```typescript
-triggers: [
-  { type: 'state_changed', entity: 'binary_sensor.parlour_motion' },
-  { type: 'state_changed', entity: /^binary_sensor\..+_motion$/ },
-  { type: 'schedule', cron: '0 22 * * *' },
-  { type: 'on_start' },
-  { type: 'timer_expired', timerKey: 'kitchen:lights:off-delay' },
-  { type: 'button', entity: 'sensor.hallway_button', gesture: 'double_press' },
-]
-```
-
----
-
-## Action types
-
-Actions are returned from `reduce()` as a plain array. The runtime executes them after the observability snapshot is published.
 
 | Action | Effect |
 |--------|--------|
@@ -157,83 +129,55 @@ Actions are returned from `reduce()` as a plain array. The runtime executes them
 | `timer.start` | Starts (or restarts) a named timer |
 | `timer.cancel` | Cancels a named timer |
 
-```typescript
-actions: [
-  {
-    type: 'ha.call_service',
-    domain: 'climate',
-    service: 'set_temperature',
-    target: { entity_id: 'climate.bedroom_trv' },
-    data: { temperature: 20 },
-  },
-  {
-    type: 'timer.start',
-    timerKey: 'kitchen:lights:off-delay',
-    delayMs: 120_000,
-  },
-  {
-    type: 'mqtt.publish',
-    topic: 'homerun/decisions/kitchen',
-    payload: JSON.stringify({ decision: 'lights_on' }),
-    retain: false,
-  },
-]
-```
+Actions are returned from `reduce()` as a plain array; the runtime executes them after the decision event is published. Full types and semantics: [Automation API](docs/api.md).
 
 ---
 
 ## Observability
 
-Every pipeline run publishes a decision snapshot to MQTT — whether it completed, aborted, or threw. Each snapshot carries a `correlation_id` minted at the event source, so you can trace a HA state change through to the TRV setpoint that resulted from it.
+Every pipeline run publishes an event to MQTT — whether it decided, aborted, or threw — and every action publishes its own start and result events. A `correlation_id` minted at the event source lets you trace a HA state change through to the service call that resulted from it.
 
 ```json
 {
-  "schema": "home.events.v1",
+  "schema": "home.events.v2",
   "correlation_id": "b3d2f1a0-...",
+  "root_correlation_id": "b3d2f1a0-...",
   "automation_id": "kitchen:lighting",
   "location": "kitchen",
   "subsystem": "lighting",
   "event_type": "decision",
+  "trigger": { "type": "state_changed", "entity_id": "binary_sensor.kitchen_motion", "to": "on" },
   "decision": "lights_on",
-  "inputs": { "motion": true, "lux": 20, "luxThreshold": 40 },
+  "conditions": { "motion": true, "lux": 20, "luxThreshold": 40 },
   "actions": [{ "type": "ha.call_service", "domain": "light", "service": "turn_on" }],
+  "hasAction": true,
   "timestamp": "2026-06-23T18:00:00.000Z"
 }
 ```
 
----
-
-## Environment variables
-
-| Variable | Purpose |
-|----------|---------|
-| `HA_URL` | Home Assistant base URL (e.g. `http://homeassistant.local:8123`) |
-| `HA_TOKEN` | Long-lived access token |
-| `MQTT_URL` | MQTT broker URL (e.g. `mqtt://localhost:1883`) |
-| `AUTOMATIONS_DIR` | Directory of automation files (hot-reloaded on change) |
-| `DRY_RUN` | Set to `true` to log actions without executing them |
+Schema, topics, command-ack tracking and Prometheus metrics: [Observability](docs/observability.md).
 
 ---
 
 ## Running
 
-> Homerun is not yet published to npm. Clone the repository and run directly from source.
-
 ```bash
-# Development — hot-reloads automations on file change
-npm run dev
-
-# Run tests
-npm test
+npm install @ajclarkson/homerun
 ```
 
-Set `DRY_RUN=true` to run the full pipeline — context, reduce, observability — without making any HA service calls. This is the default for local development.
+Homerun reads a `configuration.yaml` (path from `HOMERUN_CONFIG`) with your Home Assistant URL and token, MQTT broker and automations directory. Secrets can live in a `secrets.yaml` beside it and be referenced with `!secret`. [`configuration.yaml.example`](configuration.yaml.example) shows every option.
+
+Set `options.dry_run: true` to run the full pipeline — context, reduce, observability — without executing any actions.
+
+Setting up your own automations repo, generating entity types from your Home Assistant, and running the runtime are covered in [Consumer setup](docs/consumers.md).
+
+To work on the framework itself, clone this repo and use `npm run dev` (run from source, hot-reloads) and `npm test`.
 
 ---
 
-## API
+## HTTP API
 
-The server exposes an HTTP API on port `7070` by default.
+The server exposes an HTTP API on port `7070` by default (`server.port` in the config).
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -266,7 +210,7 @@ TimerManager (setTimeout)  ──────►        │
                           ┌──────────────┴──────────────┐
                           ▼                             ▼
                    Observability                  ActionRuntime
-                 (MQTT snapshot)         (HA calls / timers / MQTT)
+                 (MQTT events)           (HA calls / timers / MQTT)
 ```
 
 ---
