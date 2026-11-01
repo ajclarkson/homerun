@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { HAClient, type StateChangedEvent } from './ha-client.js';
 
 // ---------- Mock home-assistant-js-websocket ----------
@@ -70,6 +70,9 @@ async function connectAndInitialise(
   return { client, connectPromise };
 }
 
+// Mirrors the debounce in ha-client.ts; advancing by exactly this must fire it.
+const REGISTRY_DEBOUNCE_MS = 500;
+
 // ---------- Tests ----------
 
 describe('HAClient', () => {
@@ -77,9 +80,15 @@ describe('HAClient', () => {
     capturedSubscribeCallback = null;
     capturedDisconnectListener = null;
     capturedRegistryUpdatedCallback = null;
+    // Only timers are faked: connectClient drains microtasks with setImmediate.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     vi.clearAllMocks();
     mockConnection.sendMessagePromise.mockResolvedValue([]);
     mockCallService.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   describe('initial connection', () => {
@@ -701,7 +710,7 @@ describe('HAClient', () => {
       capturedSubscribeCallback!(snapshot({ 'light.a': makeEntity('on', 'T2') }));
 
       // Give the background registry reload a tick to complete.
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await vi.advanceTimersByTimeAsync(REGISTRY_DEBOUNCE_MS);
 
       expect(client.context.labelsFor('light.a')).toEqual(['new_label']);
       expect(client.context.entitiesByLabel('old_label')).toEqual([]);
@@ -753,7 +762,7 @@ describe('HAClient', () => {
       capturedDisconnectListener!();
       capturedSubscribeCallback!(snapshot({ 'light.a': makeEntity('on', 'T2') }));
 
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await vi.advanceTimersByTimeAsync(REGISTRY_DEBOUNCE_MS);
 
       expect(client.context.entitiesByArea('old_room')).toEqual([]);
       expect(client.context.entitiesByArea('new_room')).toEqual(['light.a']);
@@ -777,7 +786,7 @@ describe('HAClient', () => {
       expect(client.context.labelsFor('light.a')).toEqual(['old_label']);
 
       capturedRegistryUpdatedCallback!();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await vi.advanceTimersByTimeAsync(REGISTRY_DEBOUNCE_MS);
 
       expect(client.context.labelsFor('light.a')).toEqual(['new_label']);
       expect(client.context.entitiesByLabel('old_label')).toEqual([]);
@@ -800,7 +809,7 @@ describe('HAClient', () => {
       expect(client.context.entitiesByArea('old_room')).toEqual(['light.a']);
 
       capturedRegistryUpdatedCallback!();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await vi.advanceTimersByTimeAsync(REGISTRY_DEBOUNCE_MS);
 
       expect(client.context.entitiesByArea('old_room')).toEqual([]);
       expect(client.context.entitiesByArea('new_room')).toEqual(['light.a']);
@@ -816,40 +825,105 @@ describe('HAClient', () => {
       );
     });
 
-    it('coalesces a burst of entity_registry_updated events into one in-flight reload plus one trailing retry', async () => {
-      let resolveFirstReload!: (entries: Array<{ entity_id: string; labels?: string[] }>) => void;
-      const firstReload = new Promise<Array<{ entity_id: string; labels?: string[] }>>((resolve) => {
-        resolveFirstReload = resolve;
-      });
+    type Entries = Array<{ entity_id: string; labels?: string[] }>;
 
+    it('collapses a burst within the debounce window into exactly one fetch', async () => {
       (mockConnection.sendMessagePromise as Mock)
-        .mockResolvedValueOnce([{ entity_id: 'light.a', labels: ['old_label'] }]) // initial load on connect
-        .mockImplementationOnce(() => firstReload) // first burst-triggered reload — stays in flight
-        .mockResolvedValueOnce([{ entity_id: 'light.a', labels: ['final_label'] }]); // trailing retry
+        .mockResolvedValueOnce([{ entity_id: 'light.a', labels: ['old_label'] }])
+        .mockResolvedValueOnce([{ entity_id: 'light.a', labels: ['final_label'] }]);
 
       const { client } = await connectClient();
       capturedSubscribeCallback!(snapshot({ 'light.a': makeEntity('on', 'T1') }));
       await client.ready;
 
-      // A burst of events arrives before the first reload resolves.
-      capturedRegistryUpdatedCallback!();
-      capturedRegistryUpdatedCallback!();
-      capturedRegistryUpdatedCallback!();
-      capturedRegistryUpdatedCallback!();
+      for (let i = 0; i < 5; i++) {
+        capturedRegistryUpdatedCallback!();
+        await vi.advanceTimersByTimeAsync(REGISTRY_DEBOUNCE_MS - 1);
+      }
+      expect(mockConnection.sendMessagePromise).toHaveBeenCalledTimes(1);
 
-      // Only the connect-time load and the single in-flight reload should have
-      // started — the other 3 events must coalesce into one pending retry, not
-      // 3 additional concurrent config/entity_registry/list fetches.
+      await vi.advanceTimersByTimeAsync(1);
+      expect(mockConnection.sendMessagePromise).toHaveBeenCalledTimes(2);
+      expect(client.context.labelsFor('light.a')).toEqual(['final_label']);
+    });
+
+    it('runs exactly one trailing fetch for events arriving while a fetch is in flight', async () => {
+      let resolveFirstReload!: (entries: Entries) => void;
+      const firstReload = new Promise<Entries>((resolve) => {
+        resolveFirstReload = resolve;
+      });
+
+      (mockConnection.sendMessagePromise as Mock)
+        .mockResolvedValueOnce([{ entity_id: 'light.a', labels: ['old_label'] }]) // connect-time load
+        .mockImplementationOnce(() => firstReload) // first debounced reload, stays in flight
+        .mockResolvedValueOnce([{ entity_id: 'light.a', labels: ['final_label'] }]); // trailing rerun
+
+      const { client } = await connectClient();
+      capturedSubscribeCallback!(snapshot({ 'light.a': makeEntity('on', 'T1') }));
+      await client.ready;
+
+      capturedRegistryUpdatedCallback!();
+      await vi.advanceTimersByTimeAsync(REGISTRY_DEBOUNCE_MS);
+      expect(mockConnection.sendMessagePromise).toHaveBeenCalledTimes(2);
+
+      // Further bursts, each outliving the debounce, while the fetch is in flight.
+      for (let i = 0; i < 3; i++) {
+        capturedRegistryUpdatedCallback!();
+        await vi.advanceTimersByTimeAsync(REGISTRY_DEBOUNCE_MS);
+      }
       expect(mockConnection.sendMessagePromise).toHaveBeenCalledTimes(2);
 
       resolveFirstReload([{ entity_id: 'light.a', labels: ['old_label'] }]);
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await vi.advanceTimersByTimeAsync(0);
 
-      // Exactly one trailing retry ran after the burst settled, reflecting the
-      // final state rather than being dropped.
       expect(mockConnection.sendMessagePromise).toHaveBeenCalledTimes(3);
       expect(client.context.labelsFor('light.a')).toEqual(['final_label']);
+    });
+
+    it('keeps the previous label and area maps when a reload fails', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      (mockConnection.sendMessagePromise as Mock)
+        .mockResolvedValueOnce([{ entity_id: 'light.a', labels: ['kept'], area_id: 'kept_room' }])
+        .mockRejectedValueOnce(new Error('socket closed'));
+
+      const { client } = await connectClient();
+      capturedSubscribeCallback!(snapshot({ 'light.a': makeEntity('on', 'T1') }));
+      await client.ready;
+
+      capturedRegistryUpdatedCallback!();
+      await vi.advanceTimersByTimeAsync(REGISTRY_DEBOUNCE_MS);
+
+      expect(errorSpy).toHaveBeenCalled();
+      expect(client.context.labelsFor('light.a')).toEqual(['kept']);
+      expect(client.context.entitiesByLabel('kept')).toEqual(['light.a']);
+      expect(client.context.entitiesByArea('kept_room')).toEqual(['light.a']);
+      errorSpy.mockRestore();
+    });
+
+    it('cancels a pending debounced reload on disconnect', async () => {
+      const { client } = await connectClient();
+      capturedSubscribeCallback!(snapshot({}));
+      await client.ready;
+      mockConnection.sendMessagePromise.mockClear();
+
+      capturedRegistryUpdatedCallback!();
+      client.disconnect();
+      await vi.advanceTimersByTimeAsync(REGISTRY_DEBOUNCE_MS * 2);
+
+      expect(mockConnection.sendMessagePromise).not.toHaveBeenCalled();
+    });
+
+    it('does not debounce the connect-time load', async () => {
+      (mockConnection.sendMessagePromise as Mock).mockResolvedValueOnce([
+        { entity_id: 'light.a', labels: ['initial'] },
+      ]);
+
+      const { client } = await connectClient();
+      // No timer advance: the load must already have happened.
+      expect(mockConnection.sendMessagePromise).toHaveBeenCalledTimes(1);
+      capturedSubscribeCallback!(snapshot({ 'light.a': makeEntity('on', 'T1') }));
+      await client.ready;
+      expect(client.context.labelsFor('light.a')).toEqual(['initial']);
     });
   });
 
