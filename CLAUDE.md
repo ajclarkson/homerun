@@ -4,7 +4,7 @@
 
 Homerun is a TypeScript framework for Home Assistant automation. It enforces a typed, testable pattern: context builder + pure reducer + declarative actions. Designed to be published as `@ajclarkson/homerun`.
 
-This repository contains the framework only — no automations, no household-specific configuration, no entity names. Those live in a separate `homerun-automations` repo, which is public — keep that in mind when writing anything there (issues, PRs, commits) too.
+This repository contains the framework only — no automations, no household-specific configuration, no entity names. Consumers keep their automations in their own repo and depend on this package. Everything written here (code, docs, issues, PRs, commits) is public.
 
 ## What this is not
 
@@ -12,9 +12,8 @@ This repo should never contain:
 - Automation logic for any specific home
 - Real entity IDs, room names, or household configuration
 - HA credentials or environment-specific URLs
-- Migration notes or references to Node-RED flows
 
-If you find yourself wanting to reference specific entities or rooms while working here, that's a signal to step back to the design docs first.
+If you find yourself wanting to reference specific entities or rooms while working here, use a generic placeholder (`sensor.example`) instead.
 
 ## Architecture
 
@@ -33,111 +32,24 @@ The framework has seven core components:
 
 **Event source pattern:** Scheduler and TimerManager are independent event sources — they have no dependency on HAClient and generate events from time/timers. Both call `TriggerEngine.dispatch()`. TriggerEngine is a pure router with zero self-generated events.
 
-Full design intent is documented externally. This CLAUDE.md covers what you need to work in this codebase.
+Per-component detail is in the code; the public API and event schema are in `docs/`.
 
-## The automation API
+## Docs (read on demand)
 
-An automation is a typed object. This is the public API surface — changes here are breaking changes.
+- `docs/api.md`: automation API, trigger and action types, `requireState()`, `HAContext`, testing helpers. Read before changing anything public.
+- `docs/observability.md`: `ObsEvent` schema (`home.events.v2`), `commandAck`, MQTT topics, Prometheus vs `ObsEvent`. Read before changing events or metrics.
+- `docs/consumers.md`: how a consumer repo is set up: install, layout, type generation, config, running. Read when changing the loader, config, bins or packaging.
+- `README.md`: overview, quick start, and the HTTP API (health, automations, reload, `/events` stream).
 
-```typescript
-interface Automation<C> {
-  id: string;
-  location: string;
-  subsystem: string;
-  triggers: Trigger[];
-  context: (state: HAState, ha: HAContext) => C | Abort;
-  reduce: (ctx: C) => Decision;
-}
-```
+## Commands
 
-`defineAutomation` is the user-facing entry point — it provides type inference on the context shape.
-
-## Trigger types
-
-```typescript
-type Trigger =
-  | { type: 'state_changed'; entity: string | RegExp }
-  | { type: 'schedule'; cron: string }
-  | { type: 'on_start' }
-  | { type: 'timer_expired'; timerKey: string }
-  | { type: 'button'; entity: string; gesture: 'single_press' | 'double_press' | 'hold'; button?: string }
-  | { type: 'mqtt_in'; topic: string };
-```
-
-`on_start` fires once when the system is ready and the state cache is populated. It has no `delayMs` — if startup work needs to be deferred, emit a `timer.start` action from the reducer and handle `timer_expired` instead.
-
-## Action types
-
-```typescript
-type Action =
-  | { type: 'ha.call_service'; domain: string; service: string;
-      target?: { entity_id: string }; data?: Record<string, unknown> }
-  | { type: 'mqtt.publish'; topic: string; payload: string; retain?: boolean; impliesEntity?: string }
-  | { type: 'timer.start'; timerKey: string; delayMs: number }
-  | { type: 'timer.cancel'; timerKey: string };
-```
-
-Unknown action types must log a warning and emit an error observability event — never silently dropped.
-
-### `mqtt.publish` and `impliesEntity`
-
-`sensor`/`binary_sensor` domains in HA have no service call to set their state — publishing to a manually-configured MQTT entity's `state_topic` is the correct (and only) way to drive them. Set `impliesEntity` to that entity's ID whenever `topic` is one of these `state_topic`s. This lets the HA Client link the `state_changed` HA emits in response back to this automation's run (`parent_correlation_id`/`parent_automation_id` on the resulting observability events), the same way `ha.call_service` gets that link automatically via `target.entity_id`.
-
-There's no way for the framework to detect a missing `impliesEntity` — a topic string carries no information about which HA entity, if any, mirrors it, and that mapping lives entirely in HA's own (often manual) MQTT config. Leaving it unset doesn't break anything; it just means the resulting `state_changed`, and anything that reacts to it, won't be traceable back to this automation's run.
-
-## Decision and observability events
-
-```typescript
-interface Decision {
-  decision: string;
-  reason?: string;
-  actions: Action[];
-  // The conditions that determined this decision (e.g. lux level, house mode). Distinct from
-  // `trigger` on the published event (what happened) — this is why it was allowed to happen
-  // this way. Optional: defaults to the full context object returned by `context()` if omitted,
-  // so this is "for free" for most automations — only set it explicitly to trim or reshape what
-  // gets published (e.g. a context object holding something not worth publishing wholesale).
-  conditions?: Record<string, unknown>;
-}
-```
-
-Every pipeline run publishes an `ObsEvent` (`schema: 'home.events.v2'`) to `homerun/events`, and — for `decision`/`abort` only — a retained snapshot to `homerun/{location}/{subsystem}/decision`. It's a discriminated union on `event_type`, not one flat shape:
-
-- `decision` — carries `trigger` (a trimmed summary of the real trigger — `{ type, entity_id?, to?, from?, cron?, ... }` depending on trigger type), `decision`/`reason`/`conditions` from the reducer, `actions`, and `hasAction: boolean` (framework-computed from `actions.length > 0` — filter on this, not on parsing `decision` strings, to find every decision that resulted in at least one action).
-- `abort` — carries `trigger` and `abort_kind: 'disabled' | 'unhandled_error' | 'guard' | 'unavailable_input'` (`'guard'` covers every author-triggered `abort()` call; `'unavailable_input'` is `requireState()`/`requireNumericState()` detecting a missing entity, with `entity` set to which one; `reason` on top of that is whatever string `abort()` was given, when applicable).
-- `action_started` / `action_result` — one pair per action in the plan, each carrying the single `action` it's about (not an array — always exactly one). `action_result` carries `status: 'ok' | 'error'` and, on failure, `error` with the detail. Emitted as two separate wire events deliberately: a `action_started` with no matching `action_result` is itself a signal (a hung HA call, a crash mid-action).
-- `action_ack_timeout` — opt-in (`commandAck.enabled`, see below), fires when a dispatched `ha.call_service`'s expected state/attribute change never arrives within `commandAck.timeoutMs`. Carries `action`, `entity`, and `expected` (the field/attribute → value map that was never satisfied). Arrives well after that run's own `action_result: 'ok'` — that only confirms HA accepted the WebSocket call, not that the device responded — so it can't be folded into that event; it's a separate, later-arriving signal correlated back via the same `correlation_id`.
-
-### `commandAck` — command acknowledgment tracking
-
-Opt-in (`commandAck.enabled`, default `false`) detection of a dispatched `ha.call_service` whose target entity never reaches the expected state — device unreachable, Zigbee mesh failure, or HA accepting the call but the device not responding. Deliberately convention-based rather than a per-service mapping table (which couldn't scale to arbitrary third-party integrations): a service's `data` keys are treated as the resulting attribute names it sets (`temperature`, `brightness`, `position`, ...) — true as a platform-wide HA naming convention, not domain-specific knowledge homerun has to hand-maintain — with `turn_on`/`turn_off` special-cased to `state: 'on'`/`'off'`, and a small denylist (`transition`, `entity_id`) excluding known non-attribute call parameters. Before tracking, the target entity's current state is checked against every expected field; if already satisfied (an idempotent call), nothing is tracked — no `state_changed` would fire anyway, so tracking it would produce a false-positive timeout. Only single-entity `target.entity_id` calls are tracked; multi-entity/scene dispatches are out of scope.
-
-### `requireState()` and `requireNumericState()`
-
-The dominant `abort()` pattern across real automations (~70% of call sites, per an audit) is a required entity's state being missing or invalid — `const x = state(id)?.state; if (x === undefined) return abort(...)`, repeated at every such check. `requireState(state, entityId)`/`requireNumericState(state, entityId)` collapse that to one line each:
-
-```typescript
-context: (state) => {
-  const houseMode = requireState(state, 'sensor.house_active_mode');
-  const luxThreshold = requireNumericState(state, `input_number.${location}_automation_lux_threshold_dark`);
-  // ... no per-call guard needed — throws UnavailableInputError on failure
-}
-```
-
-They throw `UnavailableInputError` rather than returning `Abort` — `pipeline.ts` already wraps `context()` in try/catch, and this lets call sites skip the `if (isAbort(...)) return ...` boilerplate entirely. Caught specially and classified as `abort_kind: 'unavailable_input'` with `entity` set to the entity ID, distinct from a genuine bug (`'unhandled_error'`). `requireNumericState` additionally checks `Number.isFinite` after `parseFloat`, matching the other half of the audited pattern (numeric threshold/sensor checks).
-
-Fails fast on the first missing entity, matching how every existing `abort()` call site already behaves — it does not collect every missing entity in one context() call before aborting.
-
-## HAContext
-
-Passed as the second argument to every context builder. Provides synchronous access to entity registry data loaded at startup.
-
-```typescript
-interface HAContext {
-  entitiesByLabel: (label: string) => string[];
-  labelsFor: (entity: string) => string[];
-  entitiesByArea: (area: string) => string[];
-}
+```bash
+npm run dev            # run from source, hot-reloads automations (DRY_RUN is the safe default)
+npm run build          # tsc
+npm test               # vitest, watch mode
+npm run test:run       # vitest, single run (use before committing)
+npm run generate:ha-types      # generate entity types from a live HA instance
+npm run generate:ha-services   # generate typed service helpers
 ```
 
 ## Reliability requirements
@@ -163,18 +75,13 @@ Inspired by [TigerBeetle's TIGER_STYLE.md](https://github.com/tigerbeetle/tigerb
 
 ## Dry-run mode
 
-`DRY_RUN=true` causes the action runtime to log actions rather than execute them. The full pipeline runs — context, reduce, observability — but `ha.call_service` and `mqtt.publish` are no-ops. This is the default for local development and must be built in from the start.
+`options.dry_run: true` in the config causes the action runtime to log actions rather than execute them. The full pipeline runs — context, reduce, observability — but `ha.call_service` and `mqtt.publish` are no-ops. Dry-run events go to `homerun/dev/*` topics. Use it for local development.
 
-## Environment variables
+## Configuration
 
-| Variable | Purpose |
-|----------|---------|
-| `HA_URL` | Home Assistant base URL |
-| `HA_TOKEN` | Long-lived access token |
-| `MQTT_URL` | MQTT broker URL |
-| `AUTOMATIONS_DIR` | Path to automation files (watched by hot reload) |
-| `DRY_RUN` | Set to `true` to disable action execution |
-| `AUTOMATION` | Scope hot reload to a single file (optional, dev only) |
+The runtime reads `configuration.yaml` (path from `HOMERUN_CONFIG`, default `./configuration.yaml`), with `!secret` values from a `secrets.yaml` beside it. Schema and defaults: `src/framework/config.ts`; annotated example: `configuration.yaml.example`.
+
+Environment variables are few: `HOMERUN_CONFIG` (config path), `AUTOMATION` (dev only: scope hot reload to one file), and `HA_URL`/`HA_TOKEN` (used only by the type and service generators).
 
 ## Development workflow
 
@@ -202,35 +109,10 @@ it('returns no_action when disabled', () => {
 
 `HAState` in tests is a plain function: `(entity: string) => mockValues[entity]`.
 
-## MQTT topics
+## Consumers
 
-All observability events are published under the `homerun/` namespace:
+A consumer is a repo that depends on this package, holds its automations, and runs the runtime (see `docs/consumers.md`). Anything exported from `src/lib.ts` or `src/testing.ts` is public API.
 
-| Topic | Retained | Purpose |
-|-------|----------|---------|
-| `homerun/events` | No | Event bus — every decision, abort, and action event |
-| `homerun/{location}/{subsystem}/decision` | Yes | Latest decision snapshot per automation |
-| `homerun/dev/events` | No | Same as above but when `DRY_RUN=true` |
-| `homerun/dev/{location}/{subsystem}/decision` | Yes | Same as above but when `DRY_RUN=true` |
+## Roadmap
 
-Dry-run events are routed to `homerun/dev/*` so they cannot overwrite retained live decision state.
-
-## Observability: Prometheus vs ObsEvent
-
-The framework has two independent observability outputs, each the source of truth for a different question. Neither is a subset of the other — don't use one to reconstruct what the other already answers.
-
-**Prometheus (`MetricsBackend`, `homerun_*` metrics)** is for aggregates: rates, counts, durations, trends over time. `homerun_actions_dispatched_total`/`_succeeded_total`/`_failed_total`, `homerun_action_duration_seconds`, `homerun_pipeline_runs_total`, `homerun_automations_loaded`, `homerun_action_ack_timeout_total`. The right tool for "how often is X happening" or "what's the failure rate for this action type" — it's already structured for `rate()`/`sum by (...)` queries. Opt-in via `metrics.enabled` in config; a no-op backend (`NoopMetricsBackend`) is used when disabled, so metrics calls are always safe to make regardless of whether anything is actually collecting them.
-
-**`ObsEvent` (`homerun/events`, `homerun/{location}/{subsystem}/decision`, and the `/events` SSE endpoint)** is for point-in-time audit and causal tracing: one specific pipeline run, correlated via `correlation_id`/`root_correlation_id`/`parent_correlation_id`, with the full decision reasoning attached (`trigger`, `conditions`, `reason`, `abort_kind`). The right tool for "what exactly happened on this run and why," not for aggregate questions — parsing the event stream to compute a success rate is the wrong layer; that's what the Prometheus counters already do.
-
-The `/events` SSE endpoint (`ApiServer`) is fed by `EventPublisher.subscribe()`, an in-process listener list — separate from the MQTT `publish()` calls. Anything hooking into `ObsEvent`s in-process (SSE today; a future persistent store for a UI) should use `subscribe()`, not consume the MQTT stream — this keeps it working independently of whether MQTT publishing for `ObsEvent` is enabled at all.
-
-`events.enabled` (default `true`, mirrors `metrics.enabled`) gates the MQTT publishing side of `ObsEvent` only — `homerun/events` and the retained decision snapshot. `subscribe()` listeners (the `/events` SSE endpoint, any future UI store) are always notified regardless, and `publishLifecycle` (the online/offline status heartbeat) is unaffected — it's a process-liveness signal, not part of `ObsEvent`.
-
-## Consumer repo
-
-Automations live in a separate consumer repo (`homerun-automations`, public). It depends on this package via a local file link (`"homerun": "file:../homerun"`). The `homerun-generate-ha-types` bin is invoked from there as `npm run codegen`.
-
-## Current state
-
-The full bootstrap is running. The framework is in active development — remaining work is tracked as [GitHub issues](https://github.com/ajclarkson/homerun/issues).
+Remaining work is tracked as [GitHub issues](https://github.com/ajclarkson/homerun/issues).
