@@ -83,6 +83,12 @@ interface EntityRegistryEntry {
   entity_id: string;
   labels?: string[];
   area_id?: string | null;
+  device_id?: string | null;
+}
+
+interface DeviceRegistryEntry {
+  id: string;
+  area_id?: string | null;
 }
 
 interface PendingAck extends AckOrigin {
@@ -237,6 +243,14 @@ export class HAClient extends EventEmitter {
       console.error('[ha-client] failed to subscribe to entity_registry_updated:', err);
     });
 
+    // Device area changes alter inherited entity areas; same coalesced reload path.
+    this.connection.subscribeEvents(() => {
+      console.log('[ha-client] device_registry_updated received — reloading registry');
+      this.requestRegistryReload();
+    }, 'device_registry_updated').catch((err) => {
+      console.error('[ha-client] failed to subscribe to device_registry_updated:', err);
+    });
+
     let firstSnapshot = true;
 
     subscribeEntities(this.connection, (entities: HassEntities) => {
@@ -345,11 +359,22 @@ export class HAClient extends EventEmitter {
   private async loadEntityRegistry(): Promise<void> {
     if (!this.connection) return;
 
-    const entries = (await this.connection.sendMessagePromise({
-      type: 'config/entity_registry/list',
-    })) as EntityRegistryEntry[];
+    // Fetched together so the entity and device views come from one moment.
+    const [entries, devices] = (await Promise.all([
+      this.connection.sendMessagePromise({ type: 'config/entity_registry/list' }),
+      this.connection.sendMessagePromise({ type: 'config/device_registry/list' }),
+    ])) as [EntityRegistryEntry[], DeviceRegistryEntry[]];
     if (!Array.isArray(entries)) {
       throw new Error('config/entity_registry/list returned a non-array payload');
+    }
+    if (!Array.isArray(devices)) {
+      throw new Error('config/device_registry/list returned a non-array payload');
+    }
+
+    // Entities without their own area inherit their device's area (as HA does).
+    const deviceToArea = new Map<string, string>();
+    for (const device of devices) {
+      if (device.area_id) deviceToArea.set(device.id, device.area_id);
     }
 
     // Build into locals and swap only once complete: a failed fetch (thrown
@@ -370,11 +395,13 @@ export class HAClient extends EventEmitter {
         set.add(entry.entity_id);
       }
 
-      if (entry.area_id) {
-        let set = areaToEntities.get(entry.area_id);
+      // `||` not `??`: an empty-string area_id means "unset" and must fall back.
+      const area = entry.area_id || (entry.device_id ? deviceToArea.get(entry.device_id) : undefined);
+      if (area) {
+        let set = areaToEntities.get(area);
         if (!set) {
           set = new Set();
-          areaToEntities.set(entry.area_id, set);
+          areaToEntities.set(area, set);
         }
         set.add(entry.entity_id);
       }

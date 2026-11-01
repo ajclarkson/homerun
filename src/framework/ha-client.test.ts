@@ -6,6 +6,7 @@ import { HAClient, type StateChangedEvent } from './ha-client.js';
 let capturedSubscribeCallback: ((entities: Record<string, unknown>) => void) | null = null;
 let capturedDisconnectListener: (() => void) | null = null;
 let capturedRegistryUpdatedCallback: (() => void) | null = null;
+let capturedDeviceUpdatedCallback: (() => void) | null = null;
 
 const mockConnection = {
   addEventListener: vi.fn((event: string, cb: () => void) => {
@@ -13,10 +14,49 @@ const mockConnection = {
   }),
   subscribeEvents: vi.fn(async (cb: () => void, eventType: string) => {
     if (eventType === 'entity_registry_updated') capturedRegistryUpdatedCallback = cb;
+    if (eventType === 'device_registry_updated') capturedDeviceUpdatedCallback = cb;
   }),
   sendMessagePromise: vi.fn(async () => []),
   close: vi.fn(),
 };
+
+// Registry loads issue two list calls (entity + device), so responses are queued per
+// message type rather than by call order. An empty queue yields an empty list.
+type Queued = unknown | (() => Promise<unknown>);
+const registryQueues: Record<string, Queued[]> = {
+  'config/entity_registry/list': [],
+  'config/device_registry/list': [],
+};
+
+function queueEntities(...responses: Queued[]) {
+  registryQueues['config/entity_registry/list'].push(...responses);
+}
+
+// Chainable facade over queueEntities, mirroring the vi.fn()-style API.
+const entityQueue = {
+  mockResolvedValueOnce(v: unknown) {
+    queueEntities(v);
+    return entityQueue;
+  },
+  mockRejectedValueOnce(e: unknown) {
+    queueEntities(() => Promise.reject(e));
+    return entityQueue;
+  },
+  mockImplementationOnce(fn: () => Promise<unknown>) {
+    queueEntities(fn);
+    return entityQueue;
+  },
+};
+
+function queueDevices(...responses: Queued[]) {
+  registryQueues['config/device_registry/list'].push(...responses);
+}
+
+function entityFetchCount(): number {
+  return mockConnection.sendMessagePromise.mock.calls.filter(
+    ([msg]) => (msg as { type: string }).type === 'config/entity_registry/list',
+  ).length;
+}
 
 const mockCallService = vi.fn().mockResolvedValue(undefined);
 
@@ -61,9 +101,16 @@ async function connectClient() {
 
 async function connectAndInitialise(
   entities: Record<string, ReturnType<typeof makeEntity>> = {},
-  registryEntries: Array<{ entity_id: string; labels?: string[]; area_id?: string }> = [],
+  registryEntries: Array<{
+    entity_id: string;
+    labels?: string[];
+    area_id?: string | null;
+    device_id?: string | null;
+  }> = [],
+  deviceEntries: Array<{ id: string; area_id?: string | null }> = [],
 ) {
-  (mockConnection.sendMessagePromise as Mock).mockResolvedValueOnce(registryEntries);
+  queueEntities(registryEntries);
+  queueDevices(deviceEntries);
   const { client, connectPromise } = await connectClient();
   capturedSubscribeCallback!(snapshot(entities));
   await client.ready;
@@ -80,10 +127,16 @@ describe('HAClient', () => {
     capturedSubscribeCallback = null;
     capturedDisconnectListener = null;
     capturedRegistryUpdatedCallback = null;
+    capturedDeviceUpdatedCallback = null;
     // Only timers are faked: connectClient drains microtasks with setImmediate.
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     vi.clearAllMocks();
-    mockConnection.sendMessagePromise.mockResolvedValue([]);
+    for (const q of Object.values(registryQueues)) q.length = 0;
+    mockConnection.sendMessagePromise.mockImplementation((async (msg: { type: string }) => {
+      const next = registryQueues[msg.type]?.shift();
+      if (next === undefined) return [];
+      return typeof next === 'function' ? (next as () => Promise<unknown>)() : next;
+    }) as never);
     mockCallService.mockResolvedValue(undefined);
   });
 
@@ -104,7 +157,7 @@ describe('HAClient', () => {
     });
 
     it('emits ready event after first snapshot', async () => {
-      mockConnection.sendMessagePromise.mockResolvedValueOnce([]);
+      queueEntities([]);
       const { client } = await connectClient();
 
       const readyFired = vi.fn();
@@ -133,7 +186,7 @@ describe('HAClient', () => {
     });
 
     it('does not emit state_changed events during initial snapshot', async () => {
-      mockConnection.sendMessagePromise.mockResolvedValueOnce([]);
+      queueEntities([]);
       const { client } = await connectClient();
 
       const changes: StateChangedEvent[] = [];
@@ -694,7 +747,7 @@ describe('HAClient', () => {
     });
 
     it('reloads registry on reconnect', async () => {
-      (mockConnection.sendMessagePromise as Mock)
+      entityQueue
         .mockResolvedValueOnce([
           { entity_id: 'light.a', labels: ['old_label'] },
         ])
@@ -747,7 +800,7 @@ describe('HAClient', () => {
     });
 
     it('reloads area map on reconnect', async () => {
-      (mockConnection.sendMessagePromise as Mock)
+      entityQueue
         .mockResolvedValueOnce([
           { entity_id: 'light.a', area_id: 'old_room' },
         ])
@@ -771,7 +824,7 @@ describe('HAClient', () => {
 
   describe('entity_registry_updated live refresh', () => {
     it('reloads labels when entity_registry_updated fires', async () => {
-      (mockConnection.sendMessagePromise as Mock)
+      entityQueue
         .mockResolvedValueOnce([
           { entity_id: 'light.a', labels: ['old_label'] },
         ])
@@ -794,7 +847,7 @@ describe('HAClient', () => {
     });
 
     it('reloads area map when entity_registry_updated fires', async () => {
-      (mockConnection.sendMessagePromise as Mock)
+      entityQueue
         .mockResolvedValueOnce([
           { entity_id: 'light.a', area_id: 'old_room' },
         ])
@@ -828,7 +881,7 @@ describe('HAClient', () => {
     type Entries = Array<{ entity_id: string; labels?: string[] }>;
 
     it('collapses a burst within the debounce window into exactly one fetch', async () => {
-      (mockConnection.sendMessagePromise as Mock)
+      entityQueue
         .mockResolvedValueOnce([{ entity_id: 'light.a', labels: ['old_label'] }])
         .mockResolvedValueOnce([{ entity_id: 'light.a', labels: ['final_label'] }]);
 
@@ -840,10 +893,10 @@ describe('HAClient', () => {
         capturedRegistryUpdatedCallback!();
         await vi.advanceTimersByTimeAsync(REGISTRY_DEBOUNCE_MS - 1);
       }
-      expect(mockConnection.sendMessagePromise).toHaveBeenCalledTimes(1);
+      expect(entityFetchCount()).toBe(1);
 
       await vi.advanceTimersByTimeAsync(1);
-      expect(mockConnection.sendMessagePromise).toHaveBeenCalledTimes(2);
+      expect(entityFetchCount()).toBe(2);
       expect(client.context.labelsFor('light.a')).toEqual(['final_label']);
     });
 
@@ -853,7 +906,7 @@ describe('HAClient', () => {
         resolveFirstReload = resolve;
       });
 
-      (mockConnection.sendMessagePromise as Mock)
+      entityQueue
         .mockResolvedValueOnce([{ entity_id: 'light.a', labels: ['old_label'] }]) // connect-time load
         .mockImplementationOnce(() => firstReload) // first debounced reload, stays in flight
         .mockResolvedValueOnce([{ entity_id: 'light.a', labels: ['final_label'] }]); // trailing rerun
@@ -864,25 +917,25 @@ describe('HAClient', () => {
 
       capturedRegistryUpdatedCallback!();
       await vi.advanceTimersByTimeAsync(REGISTRY_DEBOUNCE_MS);
-      expect(mockConnection.sendMessagePromise).toHaveBeenCalledTimes(2);
+      expect(entityFetchCount()).toBe(2);
 
       // Further bursts, each outliving the debounce, while the fetch is in flight.
       for (let i = 0; i < 3; i++) {
         capturedRegistryUpdatedCallback!();
         await vi.advanceTimersByTimeAsync(REGISTRY_DEBOUNCE_MS);
       }
-      expect(mockConnection.sendMessagePromise).toHaveBeenCalledTimes(2);
+      expect(entityFetchCount()).toBe(2);
 
       resolveFirstReload([{ entity_id: 'light.a', labels: ['old_label'] }]);
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(mockConnection.sendMessagePromise).toHaveBeenCalledTimes(3);
+      expect(entityFetchCount()).toBe(3);
       expect(client.context.labelsFor('light.a')).toEqual(['final_label']);
     });
 
     it('keeps the previous label and area maps when a reload fails', async () => {
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      (mockConnection.sendMessagePromise as Mock)
+      entityQueue
         .mockResolvedValueOnce([{ entity_id: 'light.a', labels: ['kept'], area_id: 'kept_room' }])
         .mockRejectedValueOnce(new Error('socket closed'));
 
@@ -914,16 +967,157 @@ describe('HAClient', () => {
     });
 
     it('does not debounce the connect-time load', async () => {
-      (mockConnection.sendMessagePromise as Mock).mockResolvedValueOnce([
+      entityQueue.mockResolvedValueOnce([
         { entity_id: 'light.a', labels: ['initial'] },
       ]);
 
       const { client } = await connectClient();
       // No timer advance: the load must already have happened.
-      expect(mockConnection.sendMessagePromise).toHaveBeenCalledTimes(1);
+      expect(entityFetchCount()).toBe(1);
       capturedSubscribeCallback!(snapshot({ 'light.a': makeEntity('on', 'T1') }));
       await client.ready;
       expect(client.context.labelsFor('light.a')).toEqual(['initial']);
+    });
+  });
+
+  describe('entity registry / device area fallback (#217)', () => {
+    it('indexes an entity under its own area', async () => {
+      const { client } = await connectAndInitialise(
+        {},
+        [{ entity_id: 'light.a', area_id: 'room_a', device_id: 'dev1' }],
+        [{ id: 'dev1', area_id: 'room_a' }],
+      );
+      expect(client.context.entitiesByArea('room_a')).toEqual(['light.a']);
+    });
+
+    it('inherits the device area when the entity has none', async () => {
+      const { client } = await connectAndInitialise(
+        {},
+        [
+          { entity_id: 'light.a', area_id: null, device_id: 'dev1' },
+          { entity_id: 'light.b', device_id: 'dev1' },
+          { entity_id: 'light.c', area_id: '', device_id: 'dev1' },
+        ],
+        [{ id: 'dev1', area_id: 'room_a' }],
+      );
+      expect(client.context.entitiesByArea('room_a').sort()).toEqual([
+        'light.a',
+        'light.b',
+        'light.c',
+      ]);
+    });
+
+    it('prefers the entity area over a different device area', async () => {
+      const { client } = await connectAndInitialise(
+        {},
+        [{ entity_id: 'light.a', area_id: 'room_a', device_id: 'dev1' }],
+        [{ id: 'dev1', area_id: 'room_b' }],
+      );
+      expect(client.context.entitiesByArea('room_a')).toEqual(['light.a']);
+      expect(client.context.entitiesByArea('room_b')).toEqual([]);
+    });
+
+    it('omits an entity with neither an entity nor a device area', async () => {
+      const { client } = await connectAndInitialise(
+        {},
+        [
+          { entity_id: 'light.a', device_id: 'dev1' },
+          { entity_id: 'light.b', device_id: null },
+        ],
+        [{ id: 'dev1', area_id: null }],
+      );
+      expect(client.context.entitiesByArea('room_a')).toEqual([]);
+    });
+
+    it('tolerates a device_id missing from the device registry', async () => {
+      const { client } = await connectAndInitialise(
+        {},
+        [
+          { entity_id: 'light.a', device_id: 'ghost' },
+          { entity_id: 'light.b', area_id: 'room_a', device_id: 'ghost' },
+        ],
+        [{ id: 'dev1', area_id: 'room_a' }],
+      );
+      expect(client.context.entitiesByArea('room_a')).toEqual(['light.b']);
+    });
+
+    it('does not inherit labels from the device', async () => {
+      const { client } = await connectAndInitialise(
+        {},
+        [{ entity_id: 'light.a', device_id: 'dev1' }],
+        [{ id: 'dev1', area_id: 'room_a' }],
+      );
+      expect(client.context.labelsFor('light.a')).toEqual([]);
+    });
+
+    it('subscribes to device_registry_updated on connect', async () => {
+      const { client } = await connectClient();
+      capturedSubscribeCallback!(snapshot({}));
+      await client.ready;
+      expect(mockConnection.subscribeEvents).toHaveBeenCalledWith(
+        expect.any(Function),
+        'device_registry_updated',
+      );
+    });
+
+    it('reloads after a debounced device_registry_updated', async () => {
+      queueEntities([{ entity_id: 'light.a', device_id: 'dev1' }]);
+      queueDevices([{ id: 'dev1', area_id: 'old_room' }]);
+      const { client } = await connectClient();
+      capturedSubscribeCallback!(snapshot({}));
+      await client.ready;
+      expect(client.context.entitiesByArea('old_room')).toEqual(['light.a']);
+
+      queueEntities([{ entity_id: 'light.a', device_id: 'dev1' }]);
+      queueDevices([{ id: 'dev1', area_id: 'new_room' }]);
+      capturedDeviceUpdatedCallback!();
+      await vi.advanceTimersByTimeAsync(REGISTRY_DEBOUNCE_MS - 1);
+      expect(entityFetchCount()).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(entityFetchCount()).toBe(2);
+      expect(client.context.entitiesByArea('old_room')).toEqual([]);
+      expect(client.context.entitiesByArea('new_room')).toEqual(['light.a']);
+    });
+
+    it('coalesces a mixed burst of entity and device events into one reload', async () => {
+      const { client } = await connectClient();
+      capturedSubscribeCallback!(snapshot({}));
+      await client.ready;
+
+      for (let i = 0; i < 3; i++) {
+        capturedRegistryUpdatedCallback!();
+        capturedDeviceUpdatedCallback!();
+        await vi.advanceTimersByTimeAsync(REGISTRY_DEBOUNCE_MS - 1);
+      }
+      expect(entityFetchCount()).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(entityFetchCount()).toBe(2);
+      const deviceFetches = mockConnection.sendMessagePromise.mock.calls.filter(
+        ([msg]) => (msg as { type: string }).type === 'config/device_registry/list',
+      );
+      expect(deviceFetches).toHaveLength(2);
+    });
+
+    it('keeps the previous maps when the device payload is not an array', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      queueEntities([{ entity_id: 'light.a', labels: ['kept'], device_id: 'dev1' }]);
+      queueDevices([{ id: 'dev1', area_id: 'kept_room' }]);
+      const { client } = await connectClient();
+      capturedSubscribeCallback!(snapshot({}));
+      await client.ready;
+
+      queueEntities([{ entity_id: 'light.a', labels: ['lost'], area_id: 'lost_room' }]);
+      queueDevices({ not: 'an array' });
+      capturedDeviceUpdatedCallback!();
+      await vi.advanceTimersByTimeAsync(REGISTRY_DEBOUNCE_MS);
+
+      expect(errorSpy).toHaveBeenCalled();
+      expect(client.context.labelsFor('light.a')).toEqual(['kept']);
+      expect(client.context.entitiesByArea('kept_room')).toEqual(['light.a']);
+      expect(client.context.entitiesByArea('lost_room')).toEqual([]);
+      errorSpy.mockRestore();
     });
   });
 
