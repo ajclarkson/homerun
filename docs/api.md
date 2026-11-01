@@ -92,6 +92,8 @@ interface HAContext {
 }
 ```
 
+`entitiesByArea` resolves an entity's effective area: its own area if set, otherwise the area of its device. Labels are not inherited from devices. The registries reload (debounced) on `entity_registry_updated` and `device_registry_updated`.
+
 ## Testing
 
 ```typescript
