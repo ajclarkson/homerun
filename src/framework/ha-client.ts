@@ -111,11 +111,18 @@ export declare interface HAClient {
   emit(event: 'action_ack_timeout', e: AckTimeoutEvent): boolean;
 }
 
+// Quiet period after the last registry-change signal before a reload starts.
+// Long enough to swallow a bulk edit's burst, short enough that label/area
+// changes still feel live.
+const REGISTRY_RELOAD_DEBOUNCE_MS = 500;
+
 export class HAClient extends EventEmitter {
   private readonly stateCache = new Map<string, EntityState>();
-  private readonly labelToEntities = new Map<string, Set<string>>();
-  private readonly entityToLabels = new Map<string, string[]>();
-  private readonly areaToEntities = new Map<string, Set<string>>();
+  // Not readonly: loadEntityRegistry builds fresh maps and swaps the references
+  // in one synchronous step, so readers never see a half-built registry.
+  private labelToEntities = new Map<string, Set<string>>();
+  private entityToLabels = new Map<string, string[]>();
+  private areaToEntities = new Map<string, Set<string>>();
 
   // entity_id -> origin of the write that's expected to produce a state_changed for it.
   // Self-evicts after PENDING_WRITE_TTL_MS; consumed (deleted) the moment it's matched.
@@ -131,6 +138,17 @@ export class HAClient extends EventEmitter {
   // True between a disconnect event and the next subscribeEntities callback.
   // During this window we repopulate silently — no state_changed events emitted.
   private reconnecting = false;
+
+  // Registry reloads are coalesced in two layers (see #199). A trailing debounce
+  // collapses a burst of entity_registry_updated events (HA can fire many in a
+  // row for a single bulk edit) into one reload start. Single-flight then caps
+  // concurrency at one in-flight loadEntityRegistry() plus at most one trailing
+  // rerun. Single-flight alone is not enough: a burst longer than one fetch
+  // would still cause back-to-back full reloads, each a full
+  // config/entity_registry/list fetch.
+  private registryReloadTimer: ReturnType<typeof setTimeout> | null = null;
+  private registryReloadInFlight: Promise<void> | null = null;
+  private registryReloadPending = false;
 
   private _readyResolve!: () => void;
   readonly ready: Promise<void> = new Promise((resolve) => {
@@ -191,6 +209,12 @@ export class HAClient extends EventEmitter {
   }
 
   disconnect(): void {
+    // Cancel before closing so no reload fires against a torn-down connection.
+    if (this.registryReloadTimer) {
+      clearTimeout(this.registryReloadTimer);
+      this.registryReloadTimer = null;
+    }
+    this.registryReloadPending = false;
     this.connection?.close();
     this.connection = null;
   }
@@ -208,13 +232,7 @@ export class HAClient extends EventEmitter {
 
     this.connection.subscribeEvents(() => {
       console.log('[ha-client] entity_registry_updated received — reloading registry');
-      this.loadEntityRegistry()
-        .then(() => {
-          console.log(`[ha-client] registry reloaded (${this.labelToEntities.size} labels, ${this.areaToEntities.size} areas)`);
-        })
-        .catch((err) => {
-          console.error('[ha-client] registry reload failed after entity_registry_updated:', err);
-        });
+      this.requestRegistryReload();
     }, 'entity_registry_updated').catch((err) => {
       console.error('[ha-client] failed to subscribe to entity_registry_updated:', err);
     });
@@ -230,9 +248,7 @@ export class HAClient extends EventEmitter {
       } else if (this.reconnecting) {
         this.reconnecting = false;
         // Reload registry in the background — don't block the cache repopulate.
-        this.loadEntityRegistry().catch((err) => {
-          console.error('[ha-client] registry reload failed after reconnect:', err);
-        });
+        this.requestRegistryReload();
         this.repopulateCache(entities);
         this.emit('reconnected');
       } else {
@@ -290,38 +306,83 @@ export class HAClient extends EventEmitter {
     }
   }
 
+  // Debounced entry point for registry reloads — see registryReloadTimer field
+  // comment. Each call re-arms the timer so only the last signal in a burst
+  // starts a reload. The connect-time load deliberately bypasses this: `ready`
+  // must not wait on a debounce.
+  private requestRegistryReload(): void {
+    if (this.registryReloadTimer) clearTimeout(this.registryReloadTimer);
+    this.registryReloadTimer = setTimeout(() => {
+      this.registryReloadTimer = null;
+      this.startRegistryReload();
+    }, REGISTRY_RELOAD_DEBOUNCE_MS);
+  }
+
+  // Single-flight: at most one loadEntityRegistry in flight, with any requests
+  // that arrive meanwhile collapsed into one trailing rerun so the final state
+  // is never dropped. Never throws; failures are logged and swallowed so a
+  // connection hiccup can't surface as an unhandled rejection.
+  private startRegistryReload(): void {
+    if (this.registryReloadInFlight) {
+      this.registryReloadPending = true;
+      return;
+    }
+
+    this.registryReloadInFlight = (async () => {
+      do {
+        this.registryReloadPending = false;
+        try {
+          await this.loadEntityRegistry();
+          console.log(`[ha-client] registry reloaded (${this.labelToEntities.size} labels, ${this.areaToEntities.size} areas)`);
+        } catch (err) {
+          console.error('[ha-client] registry reload failed:', err);
+        }
+      } while (this.registryReloadPending);
+      this.registryReloadInFlight = null;
+    })();
+  }
+
   private async loadEntityRegistry(): Promise<void> {
     if (!this.connection) return;
 
     const entries = (await this.connection.sendMessagePromise({
       type: 'config/entity_registry/list',
     })) as EntityRegistryEntry[];
+    if (!Array.isArray(entries)) {
+      throw new Error('config/entity_registry/list returned a non-array payload');
+    }
 
-    this.labelToEntities.clear();
-    this.entityToLabels.clear();
-    this.areaToEntities.clear();
+    // Build into locals and swap only once complete: a failed fetch (thrown
+    // above) or a malformed entry (thrown below) leaves the previous maps intact.
+    const labelToEntities = new Map<string, Set<string>>();
+    const entityToLabels = new Map<string, string[]>();
+    const areaToEntities = new Map<string, Set<string>>();
 
     for (const entry of entries) {
       const labels = entry.labels ?? [];
-      this.entityToLabels.set(entry.entity_id, labels);
+      entityToLabels.set(entry.entity_id, labels);
       for (const label of labels) {
-        let set = this.labelToEntities.get(label);
+        let set = labelToEntities.get(label);
         if (!set) {
           set = new Set();
-          this.labelToEntities.set(label, set);
+          labelToEntities.set(label, set);
         }
         set.add(entry.entity_id);
       }
 
       if (entry.area_id) {
-        let set = this.areaToEntities.get(entry.area_id);
+        let set = areaToEntities.get(entry.area_id);
         if (!set) {
           set = new Set();
-          this.areaToEntities.set(entry.area_id, set);
+          areaToEntities.set(entry.area_id, set);
         }
         set.add(entry.entity_id);
       }
     }
+
+    this.labelToEntities = labelToEntities;
+    this.entityToLabels = entityToLabels;
+    this.areaToEntities = areaToEntities;
   }
 }
 
