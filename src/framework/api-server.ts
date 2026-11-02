@@ -4,6 +4,7 @@ import type { AutomationRegistry } from './registry.js';
 import type { EventPublisher, ObsEvent } from './event-publisher.js';
 import type { Automation } from '../types/automation.js';
 import type { Trigger, TriggerEvent } from '../types/triggers.js';
+import { catalogReasons } from './catalog.js';
 
 export interface MetricsProvider {
   getMetrics(): Promise<string>;
@@ -75,6 +76,8 @@ export class ApiServer {
       subsystem: a.subsystem,
       enabled: a.enabled ?? true,
       triggers: a.triggers.map(serializeTrigger),
+      // Same shape as one `home.catalog.v1` entry's `reasons`; omitted when none are declared.
+      ...(a.reasons && { reasons: catalogReasons(a) }),
     }));
     json(res, 200, automations);
   }

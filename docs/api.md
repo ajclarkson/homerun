@@ -16,7 +16,7 @@ interface Automation<C> {
 }
 ```
 
-`defineAutomation` is the user-facing entry point; it provides type inference on the context shape. `Decision` is described in `docs/observability.md`.
+`defineAutomation` is the user-facing entry point; it provides type inference on the context shape. `Decision` is described in `docs/observability.md`. Passing `reasons` (each with an `outcome` and optional `facts`) narrows `reason` and `facts` at compile time and is enforced at load and run time; see the README section "Declared reasons, catalogue and history".
 
 ## Trigger types
 

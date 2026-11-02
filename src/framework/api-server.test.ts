@@ -102,6 +102,19 @@ describe('ApiServer', () => {
       expect(body[0].triggers[0]).toEqual({ type: 'state_changed', entity: '/^sensor\\.kitchen_/' });
     });
 
+    it('adds the declared reasons to an automation that declares them, and only to that one', async () => {
+      registry.register(makeAutomation('parlour:lighting', {
+        reasons: { lux_high: { outcome: 'declined', facts: ['lux', 'threshold'] }, lights_on: { outcome: 'acted' } },
+      }));
+      registry.register(makeAutomation('kitchen:heating', { location: 'kitchen', subsystem: 'heating' }));
+      const body = await (await get(port, '/automations')).json() as Array<Record<string, unknown>>;
+      expect(body[0].reasons).toEqual({
+        lux_high: { outcome: 'declined', facts: ['lux', 'threshold'] },
+        lights_on: { outcome: 'acted', facts: [] },
+      });
+      expect(body[1]).not.toHaveProperty('reasons');
+    });
+
     it('returns all registered automations', async () => {
       registry.register(makeAutomation('parlour:lighting'));
       registry.register(makeAutomation('kitchen:heating', { location: 'kitchen', subsystem: 'heating' }));

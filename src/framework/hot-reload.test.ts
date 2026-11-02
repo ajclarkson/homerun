@@ -48,6 +48,21 @@ function makeBuildResult(code = 'export default {}') {
 
 // ---------- Tests ----------
 
+describe('_reloadFile — rejects invalid automations', () => {
+  it('registers nothing from a file containing a bad entry, and keeps the previous automations', async () => {
+    mockBuild.mockResolvedValue(makeBuildResult());
+    const reg = makeRegistry();
+    const fileToIds = new Map<string, string[]>();
+    await _reloadFile('/a.ts', reg, makeImporter({ default: makeAutomation('keep:me') }), fileToIds);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const bad = { ...makeAutomation('bad:one'), location: 'dev' };
+    await _reloadFile('/a.ts', reg, makeImporter({ default: [makeAutomation('other:one'), bad] }), fileToIds);
+    expect(reg.getAll().map((a) => a.id)).toEqual(['keep:me']);
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
+  });
+});
+
 describe('_reloadFile — happy path', () => {
   beforeEach(() => {
     mockBuild.mockResolvedValue(makeBuildResult());

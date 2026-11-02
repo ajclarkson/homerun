@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { load, CORE_SCHEMA, defineScalarTag } from 'js-yaml';
 import { z } from 'zod';
+import { MAX_HISTORY_ENTRIES } from './schemas.js';
 
 // Internal marker for !secret references resolved at load time
 interface SecretRef { __secret: string }
@@ -45,6 +46,12 @@ const ConfigSchema = z.object({
     // Defaults to true — preserves existing behaviour for deployments that don't set this.
     enabled: z.boolean().default(true),
   }).default({ enabled: true }),
+  // Absent = history off. Present = on, with defaults for both sizes. Bounded by the schema's
+  // own cap so a typo cannot grow a retained payload without limit.
+  history: z.object({
+    size: z.coerce.number().int().min(1).max(MAX_HISTORY_ENTRIES).default(20),
+    houseSize: z.coerce.number().int().min(1).max(MAX_HISTORY_ENTRIES).default(30),
+  }).optional(),
   commandAck: z.object({
     // Opt-in: unlike events.enabled, this is new/experimental behaviour with no prior
     // installed base to preserve, so it defaults off rather than needing a reason to disable.

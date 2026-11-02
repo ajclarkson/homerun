@@ -13,6 +13,7 @@ import { runPipeline } from './framework/pipeline.js';
 import { ApiServer } from './framework/api-server.js';
 import { PromMetricsBackend } from './framework/metrics-prom.js';
 import { NoopMetricsBackend } from './framework/metrics.js';
+import { CatalogPublisher } from './framework/catalog.js';
 
 process.on('uncaughtException', (err) => {
   console.error('[homerun] uncaughtException:', err);
@@ -43,7 +44,9 @@ await new Promise<void>((resolve, reject) => {
 //    `engine` is assigned before any timer can fire.
 const haClient = new HAClient();
 const registry = new AutomationRegistry();
-const eventPublisher = new EventPublisher(mqtt, config.events.enabled);
+const eventPublisher = new EventPublisher(mqtt, { enabled: config.events.enabled, history: config.history, dryRun });
+// Seed before anything can publish, so the first live entry lands on top of the restored history.
+await eventPublisher.seedHistory();
 let engine!: TriggerEngine;
 const timerManager = new TimerManager((e) => engine.dispatch(e));
 const actionRuntime = new ActionRuntime({
@@ -63,6 +66,7 @@ await rescanAutomations(automationsDir, registry);
 const initialCount = registry.getAll().length;
 metricsBackend.setGauge('homerun_automations_loaded', initialCount);
 console.log(`[homerun] loaded ${initialCount} automation(s)`);
+if (config.events.enabled) new CatalogPublisher(mqtt, registry, dryRun).start();
 
 // 4. Wire up the engine and scheduler.
 //    Track in-flight pipelines so graceful shutdown can drain before exit.
@@ -96,7 +100,7 @@ async function reload(): Promise<void> {
   const count = registry.getAll().length;
   metricsBackend.setGauge('homerun_automations_loaded', count);
   console.log(`[homerun] rescan complete — ${count} automation(s) registered`);
-  eventPublisher.publishLifecycle('rescan_complete', count, dryRun);
+  eventPublisher.publishLifecycle('rescan_complete', count);
 }
 
 process.on('SIGUSR1', () => {
@@ -123,7 +127,7 @@ await apiServer.start(config.server.port);
 // 7. Connect to HA last — state_changed events start flowing once ready resolves.
 haClient.on('reconnected', () => {
   console.log(`[homerun] reconnected — ${haClient.entityCount} entities refreshed`);
-  eventPublisher.publishLifecycle('ha_reconnected', registry.getAll().length, dryRun);
+  eventPublisher.publishLifecycle('ha_reconnected', registry.getAll().length);
 });
 
 await haClient.connect(config.homeassistant.url, config.homeassistant.token);
@@ -131,7 +135,7 @@ await haClient.ready;
 haReady = true;
 const { labels, areas } = haClient.registryStats;
 console.log(`[homerun] ready — ${haClient.entityCount} entities cached (${labels} labels, ${areas} areas)`);
-eventPublisher.publishLifecycle('server_started', registry.getAll().length, dryRun);
+eventPublisher.publishLifecycle('server_started', registry.getAll().length);
 
 // 8. Graceful SIGTERM shutdown.
 process.on('SIGTERM', () => {
@@ -140,7 +144,7 @@ process.on('SIGTERM', () => {
   shuttingDown = true;
 
   const automationCount = registry.getAll().length;
-  eventPublisher.publishLifecycle('server_stopping', automationCount, dryRun);
+  eventPublisher.publishLifecycle('server_stopping', automationCount);
 
   const drain = (): Promise<void> => {
     if (inFlight === 0) return Promise.resolve();
@@ -161,7 +165,7 @@ process.on('SIGTERM', () => {
     .then(() => apiServer.stop())
     .then(() => { scheduler.stop(); timerManager.cancelAll(); })
     .then(drain)
-    .then(() => { haClient.disconnect(); return mqtt.endAsync(); })
+    .then(() => { eventPublisher.flushHistory(); haClient.disconnect(); return mqtt.endAsync(); })
     .then(() => {
       console.log('[homerun] shutdown complete');
       process.exit(0);

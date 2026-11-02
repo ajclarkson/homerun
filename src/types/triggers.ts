@@ -84,3 +84,12 @@ export function summarizeTrigger(event: TriggerEvent): TriggerSummary {
       return { type: 'mqtt_in', topic: event.topic };
   }
 }
+
+// Listed as values so the published JSON Schema derives from them. The `satisfies` plus the
+// exhaustiveness checks make adding a trigger type or gesture without updating these a
+// compile error.
+export const TRIGGER_SUMMARY_TYPES = ['state_changed', 'schedule', 'on_start', 'timer_expired', 'button', 'mqtt_in'] as const satisfies readonly TriggerSummary['type'][];
+export const BUTTON_GESTURES = ['single_press', 'double_press', 'hold'] as const satisfies readonly Extract<TriggerSummary, { type: 'button' }>['gesture'][];
+type AssertNever<T extends never> = T;
+export type _TriggerTypesExhaustive = AssertNever<Exclude<TriggerSummary['type'], (typeof TRIGGER_SUMMARY_TYPES)[number]>>;
+export type _GesturesExhaustive = AssertNever<Exclude<Extract<TriggerSummary, { type: 'button' }>['gesture'], (typeof BUTTON_GESTURES)[number]>>;

@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { watch } from 'chokidar';
 import { build } from 'esbuild';
+import { assertRegistrable } from './registry.js';
 import type { AutomationRegistry } from './registry.js';
 import type { Automation } from '../types/automation.js';
 
@@ -41,6 +42,10 @@ export async function _reloadFile(
     const automations: Automation<unknown>[] = Array.isArray(mod.default)
       ? (mod.default as Automation<unknown>[])
       : [mod.default as Automation<unknown>];
+
+    // Validate every automation before touching the registry, so a bad entry rejects the file
+    // (logged below) and leaves the previously loaded automations from it in place.
+    for (const auto of automations) assertRegistrable(auto);
 
     // Deregister previous automations from this file only after successful load.
     for (const id of fileToIds.get(filePath) ?? []) {

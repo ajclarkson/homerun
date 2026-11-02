@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "home.catalog.v1",
+  "description": "Reasons each automation declares, with their outcome and fact keys. Published retained on <ns>/catalog.",
+  "type": "object",
+  "required": [
+    "schema",
+    "automations"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "home.catalog.v1"
+    },
+    "automations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "automation_id",
+          "location",
+          "subsystem",
+          "reasons"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "automation_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "location": {
+            "type": "string",
+            "minLength": 1
+          },
+          "subsystem": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reasons": {
+            "type": "object",
+            "minProperties": 1,
+            "propertyNames": {
+              "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+            },
+            "additionalProperties": {
+              "type": "object",
+              "required": [
+                "outcome",
+                "facts"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "outcome": {
+                  "enum": [
+                    "acted",
+                    "declined",
+                    "ignored"
+                  ]
+                },
+                "facts": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                  },
+                  "maxItems": 8,
+                  "uniqueItems": true
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
