@@ -1,11 +1,12 @@
 import type { MqttClient } from 'mqtt';
 import type { Action } from '../types/actions.js';
 import type { TriggerSummary } from '../types/triggers.js';
-import type { FactValue, Outcome } from '../types/reasons.js';
+import type { DeclarationProblem, FactValue, Outcome } from '../types/reasons.js';
 import { HistoryBuffer, classify, parseSeed } from './history.js';
-import type { HistoryConfig, HistoryEntry } from './history.js';
+import type { HistoryConfig } from './history.js';
 import { HISTORY_SCHEMA_ID, assertValidHistory } from './schemas.js';
 import { readRetained } from './retained-reader.js';
+import { namespace } from './namespace.js';
 
 type ObsEventBase = {
   schema: 'home.events.v2';
@@ -55,6 +56,16 @@ export type ObsEvent = ObsEventBase & (
       // Set only when abort_kind is 'unavailable_input' — the entity that was missing/invalid.
       entity?: string;
     }
+  | {
+      // A declaring automation returned something its declaration does not allow. The decision
+      // and its actions still go ahead (observability must never stop a real action); this
+      // event is how the mistake stays loud. No free text: `reason` and `fact` are included
+      // only when they are identifier-shaped, and the full detail goes to the log.
+      event_type: 'declaration_error';
+      problem: DeclarationProblem;
+      reason?: string;
+      fact?: string;
+    }
   | { event_type: 'action_started'; action: Action }
   | { event_type: 'action_result'; action: Action; status: 'ok' | 'error'; error?: string }
   | {
@@ -82,21 +93,34 @@ export interface LifecycleEvent {
 
 export class EventPublisher {
   private readonly listeners: Array<(event: ObsEvent) => void> = [];
-  // Keyed by namespace then location, so a dry run can never touch the live buffers.
-  private readonly locationHistory = new Map<string, Map<string, HistoryBuffer>>();
-  private readonly houseHistory = new Map<string, HistoryBuffer>();
+  private readonly locationHistory = new Map<string, HistoryBuffer>();
+  private houseHistory: HistoryBuffer | undefined;
+  // Latest payload per history topic awaiting a retained publish. A busy room would otherwise
+  // republish the whole buffer on every event; only the newest state per topic matters.
+  private readonly pendingHistory = new Map<string, HistoryBuffer>();
+  private historyTimer: NodeJS.Timeout | undefined;
+  private readonly ns: string;
+  private readonly enabled: boolean;
+  private readonly history: HistoryConfig | undefined;
+  private readonly dryRun: boolean;
+  private readonly historyDebounceMs: number;
 
-  // `enabled` gates MQTT publishing of decision/action ObsEvents only (mirrors metrics.enabled;
-  // see #144) — publishLifecycle (status/online heartbeat) is unaffected, and listeners (the
-  // /events SSE endpoint, any future persistent store) are always notified regardless, so
-  // consumers that don't want the MQTT stream aren't forced to lose in-process observability too.
+  // `enabled` gates MQTT publishing of decision/action ObsEvents (mirrors metrics.enabled; see
+  // #144), and also the catalogue and history, which are further MQTT output of the same kind.
+  // Listeners (the /events SSE endpoint, any future persistent store) are always notified, so
+  // consumers that don't want the MQTT stream aren't forced to lose in-process observability.
+  // `history` is off unless configured. `dryRun` is per process, so it is fixed here and moves
+  // every topic under homerun/dev. `historyDebounceMs` of 0 publishes immediately.
   constructor(
     private readonly mqtt: MqttClient,
-    private readonly enabled: boolean = true,
-    // Off unless configured: history adds retained topics other consumers did not ask for.
-    // Independent of `enabled`, which gates only the ObsEvent stream.
-    private readonly history?: HistoryConfig,
-  ) {}
+    options: { enabled?: boolean; history?: HistoryConfig; dryRun?: boolean; historyDebounceMs?: number } = {},
+  ) {
+    this.enabled = options.enabled ?? true;
+    this.history = options.history;
+    this.dryRun = options.dryRun ?? false;
+    this.historyDebounceMs = options.historyDebounceMs ?? 250;
+    this.ns = namespace(this.dryRun);
+  }
 
   subscribe(listener: (event: ObsEvent) => void): () => void {
     this.listeners.push(listener);
@@ -110,9 +134,8 @@ export class EventPublisher {
     if (this.enabled) {
       const payload = this.safeSerialize(event);
       if (payload !== undefined) {
-        const ns = event.dry_run ? 'homerun/dev' : 'homerun';
-        this.publish(`${ns}/events`, payload, false);
-        this.publish(`${ns}/${event.location}/${event.subsystem}/decision`, payload, true);
+        this.publish(`${this.ns}/events`, payload, false);
+        this.publish(`${this.ns}/${event.location}/${event.subsystem}/decision`, payload, true);
       }
     }
     this.recordHistory(event);
@@ -123,15 +146,15 @@ export class EventPublisher {
     if (this.enabled) {
       const payload = this.safeSerialize(event);
       if (payload !== undefined) {
-        const ns = event.dry_run ? 'homerun/dev' : 'homerun';
-        this.publish(`${ns}/events`, payload, false);
+        this.publish(`${this.ns}/events`, payload, false);
       }
     }
     this.recordHistory(event);
     this.notifyListeners(event);
   }
 
-  publishLifecycle(type: LifecycleEventType, automationCount: number, dryRun = false): void {
+  publishLifecycle(type: LifecycleEventType, automationCount: number): void {
+    const dryRun = this.dryRun;
     const event: LifecycleEvent = {
       schema: 'home.lifecycle.v1',
       type,
@@ -139,7 +162,7 @@ export class EventPublisher {
       timestamp: new Date().toISOString(),
       ...(dryRun && { dry_run: true }),
     };
-    const ns = dryRun ? 'homerun/dev' : 'homerun';
+    const ns = this.ns;
     const payload = JSON.stringify(event);
     this.publish(`${ns}/lifecycle`, payload, false);
     this.publish(`${ns}/status`, JSON.stringify({ status: 'online', automation_count: automationCount, timestamp: event.timestamp }), true);
@@ -147,49 +170,45 @@ export class EventPublisher {
 
   // Rebuilds the buffers from the retained topics so history survives a restart. Call once,
   // before the engine starts, so no live entry can race the seed. A malformed or missing seed
-  // means an empty buffer, never a failed startup. `dryRun` selects the namespace to read,
-  // keeping a dry run on `homerun/dev/...` end to end.
-  async seedHistory(dryRun: boolean, settleMs = 1000): Promise<void> {
+  // means an empty buffer, never a failed startup.
+  async seedHistory(settleMs = 1000): Promise<void> {
     const config = this.history;
-    if (!config) return;
-    const ns = dryRun ? 'homerun/dev' : 'homerun';
+    if (!config || !this.enabled) return;
+    const ns = this.ns;
     const houseTopic = `${ns}/history`;
     const locationTopic = new RegExp(`^${ns}/([^/]+)/history$`);
     // In the live namespace `homerun/+/history` also matches the dry-run house topic
     // (`homerun/dev/history`), so `dev` is reserved and never read as a location.
     const locationOf = (topic: string): string | undefined => {
       const location = locationTopic.exec(topic)?.[1];
-      return location !== undefined && (dryRun || location !== 'dev') ? location : undefined;
+      return location !== undefined && (this.dryRun || location !== 'dev') ? location : undefined;
     };
     try {
       const found = await readRetained(
         this.mqtt, [houseTopic, `${ns}/+/history`],
         (t) => t === houseTopic || locationOf(t) !== undefined, settleMs,
       );
-      for (const [topic, raw] of found) this.applySeed(ns, topic, raw, config, locationOf(topic));
+      for (const [topic, raw] of found) this.applySeed(topic, raw, config, locationOf(topic));
     } catch (err) {
       console.warn('[EventPublisher] could not read retained history, starting empty:', err);
     }
   }
 
-  private applySeed(ns: string, topic: string, raw: string, config: HistoryConfig, location?: string): void {
+  private applySeed(topic: string, raw: string, config: HistoryConfig, location?: string): void {
     const seed = parseSeed(topic, raw, location);
     if (!seed) return;
-    const buffer = location === undefined
-      ? this.bufferFor(this.houseHistory, ns, config.houseSize)
-      : this.bufferFor(this.locationMap(ns), location, config.size);
+    const buffer = location === undefined ? this.house(config) : this.locationBuffer(location, config);
     buffer.load(seed.entries);
   }
 
-  private locationMap(ns: string): Map<string, HistoryBuffer> {
-    let map = this.locationHistory.get(ns);
-    if (!map) { map = new Map(); this.locationHistory.set(ns, map); }
-    return map;
+  private house(config: HistoryConfig): HistoryBuffer {
+    this.houseHistory ??= new HistoryBuffer(config.houseSize);
+    return this.houseHistory;
   }
 
-  private bufferFor(map: Map<string, HistoryBuffer>, key: string, size: number): HistoryBuffer {
-    let buffer = map.get(key);
-    if (!buffer) { buffer = new HistoryBuffer(size); map.set(key, buffer); }
+  private locationBuffer(location: string, config: HistoryConfig): HistoryBuffer {
+    let buffer = this.locationHistory.get(location);
+    if (!buffer) { buffer = new HistoryBuffer(config.size); this.locationHistory.set(location, buffer); }
     return buffer;
   }
 
@@ -197,26 +216,41 @@ export class EventPublisher {
   // pipeline carries on, exactly like serialization above.
   private recordHistory(event: ObsEvent): void {
     const config = this.history;
-    if (!config) return;
+    if (!config || !this.enabled) return;
     try {
       const entry = classify(event);
       if (!entry) return;
       // Check the entry before it can enter either buffer: a bad entry would otherwise sit in
       // memory and be retained until the next restart.
       assertValidHistory({ schema: HISTORY_SCHEMA_ID, entries: [entry] });
-      const ns = event.dry_run ? 'homerun/dev' : 'homerun';
-      const locationBuffer = this.bufferFor(this.locationMap(ns), entry.location, config.size);
-      const houseBuffer = this.bufferFor(this.houseHistory, ns, config.houseSize);
-      this.store(locationBuffer, `${ns}/${entry.location}/history`, entry);
-      this.store(houseBuffer, `${ns}/history`, entry);
+      const locationBuffer = this.locationBuffer(entry.location, config);
+      const houseBuffer = this.house(config);
+      locationBuffer.push(entry);
+      houseBuffer.push(entry);
+      this.queueHistory(`${this.ns}/${entry.location}/history`, locationBuffer);
+      this.queueHistory(`${this.ns}/history`, houseBuffer);
     } catch (err) {
       console.error(`[EventPublisher] history skipped for ${event.event_type} from ${event.automation_id}:`, err);
     }
   }
 
-  private store(buffer: HistoryBuffer, topic: string, entry: HistoryEntry): void {
-    buffer.push(entry);
-    this.publish(topic, JSON.stringify(buffer.payload()), true);
+  private queueHistory(topic: string, buffer: HistoryBuffer): void {
+    this.pendingHistory.set(topic, buffer);
+    if (this.historyDebounceMs === 0) { this.flushHistory(); return; }
+    if (this.historyTimer) return;
+    this.historyTimer = setTimeout(() => this.flushHistory(), this.historyDebounceMs);
+    this.historyTimer.unref();
+  }
+
+  // Publishes the latest state of every pending topic now. The debounce only delays, so the
+  // retained copy always converges on the newest buffer; call this on shutdown.
+  flushHistory(): void {
+    clearTimeout(this.historyTimer);
+    this.historyTimer = undefined;
+    for (const [topic, buffer] of this.pendingHistory) {
+      this.publish(topic, JSON.stringify(buffer.payload()), true);
+    }
+    this.pendingHistory.clear();
   }
 
   private publish(topic: string, payload: string, retain: boolean): void {

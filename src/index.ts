@@ -44,9 +44,9 @@ await new Promise<void>((resolve, reject) => {
 //    `engine` is assigned before any timer can fire.
 const haClient = new HAClient();
 const registry = new AutomationRegistry();
-const eventPublisher = new EventPublisher(mqtt, config.events.enabled, config.history);
+const eventPublisher = new EventPublisher(mqtt, { enabled: config.events.enabled, history: config.history, dryRun });
 // Seed before anything can publish, so the first live entry lands on top of the restored history.
-await eventPublisher.seedHistory(dryRun);
+await eventPublisher.seedHistory();
 let engine!: TriggerEngine;
 const timerManager = new TimerManager((e) => engine.dispatch(e));
 const actionRuntime = new ActionRuntime({
@@ -100,7 +100,7 @@ async function reload(): Promise<void> {
   const count = registry.getAll().length;
   metricsBackend.setGauge('homerun_automations_loaded', count);
   console.log(`[homerun] rescan complete — ${count} automation(s) registered`);
-  eventPublisher.publishLifecycle('rescan_complete', count, dryRun);
+  eventPublisher.publishLifecycle('rescan_complete', count);
 }
 
 process.on('SIGUSR1', () => {
@@ -127,7 +127,7 @@ await apiServer.start(config.server.port);
 // 7. Connect to HA last — state_changed events start flowing once ready resolves.
 haClient.on('reconnected', () => {
   console.log(`[homerun] reconnected — ${haClient.entityCount} entities refreshed`);
-  eventPublisher.publishLifecycle('ha_reconnected', registry.getAll().length, dryRun);
+  eventPublisher.publishLifecycle('ha_reconnected', registry.getAll().length);
 });
 
 await haClient.connect(config.homeassistant.url, config.homeassistant.token);
@@ -135,7 +135,7 @@ await haClient.ready;
 haReady = true;
 const { labels, areas } = haClient.registryStats;
 console.log(`[homerun] ready — ${haClient.entityCount} entities cached (${labels} labels, ${areas} areas)`);
-eventPublisher.publishLifecycle('server_started', registry.getAll().length, dryRun);
+eventPublisher.publishLifecycle('server_started', registry.getAll().length);
 
 // 8. Graceful SIGTERM shutdown.
 process.on('SIGTERM', () => {
@@ -144,7 +144,7 @@ process.on('SIGTERM', () => {
   shuttingDown = true;
 
   const automationCount = registry.getAll().length;
-  eventPublisher.publishLifecycle('server_stopping', automationCount, dryRun);
+  eventPublisher.publishLifecycle('server_stopping', automationCount);
 
   const drain = (): Promise<void> => {
     if (inFlight === 0) return Promise.resolve();
@@ -165,7 +165,7 @@ process.on('SIGTERM', () => {
     .then(() => apiServer.stop())
     .then(() => { scheduler.stop(); timerManager.cancelAll(); })
     .then(drain)
-    .then(() => { haClient.disconnect(); return mqtt.endAsync(); })
+    .then(() => { eventPublisher.flushHistory(); haClient.disconnect(); return mqtt.endAsync(); })
     .then(() => {
       console.log('[homerun] shutdown complete');
       process.exit(0);

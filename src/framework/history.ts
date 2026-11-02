@@ -2,13 +2,13 @@ import type { Action } from '../types/actions.js';
 import type { TriggerSummary } from '../types/triggers.js';
 import type { FactValue } from '../types/reasons.js';
 import type { ObsEvent } from './event-publisher.js';
-import { HISTORY_SCHEMA_ID, MAX_HISTORY_ENTRIES, assertValidHistory } from './schemas.js';
+import { HISTORY_KINDS, HISTORY_SCHEMA_ID, MAX_HISTORY_ENTRIES, assertValidHistory } from './schemas.js';
 
 // A bounded, newest-first record of the events a person would ask "what happened here?"
 // about. Entries are structured only (reason keys, outcomes, facts): wording is the
 // consumer's job.
 
-export type HistoryKind = 'decision' | 'abort' | 'action_failed';
+export type HistoryKind = (typeof HISTORY_KINDS)[number];
 
 export interface HistoryEntry {
   ts: string;
@@ -93,6 +93,8 @@ export function classify(event: ObsEvent): HistoryEntry | undefined {
       return event.status === 'error' ? failureEntry(event, 'error', event.action) : undefined;
     case 'action_ack_timeout':
       return failureEntry(event, 'ack_timeout', event.action, event.entity);
+    // Reported separately; a mistake in an automation is not something that happened in a room.
+    case 'declaration_error':
     case 'action_started':
       return undefined;
   }

@@ -33,9 +33,9 @@ describe('declared reasons: compile-time narrowing', () => {
   it('rejects a missing declared fact', () => {
     defineAutomation({
       ...base,
-      // @ts-expect-error 'threshold' is declared but missing from facts
       reasons: { lux_high: { outcome: 'declined', facts: ['lux', 'threshold'] } },
       context: () => ({}),
+      // @ts-expect-error 'threshold' is declared but missing from facts
       reduce: () => ({ decision: 'no_action', reason: 'lux_high', facts: { lux: 1 }, actions: [] }),
     });
   });
@@ -63,9 +63,9 @@ describe('declared reasons: compile-time narrowing', () => {
   it('rejects facts for a reason that declares none', () => {
     defineAutomation({
       ...base,
-      // @ts-expect-error facts are not allowed for a reason that declares none
       reasons: { lights_on: { outcome: 'acted' } },
       context: () => ({}),
+      // @ts-expect-error facts are not allowed for a reason that declares none
       reduce: () => ({ decision: 'turn_on', reason: 'lights_on', facts: { lux: 1 }, actions: [] }),
     });
   });
@@ -80,6 +80,17 @@ describe('automations that declare nothing', () => {
         expectTypeOf(ctx).toEqualTypeOf<{ lux: number }>();
         return { decision: 'no_action', reason: 'anything_goes', actions: [] } satisfies Decision;
       },
+    });
+  });
+});
+
+describe('automations that declare nothing cannot return facts', () => {
+  it('rejects facts without a declaration', () => {
+    defineAutomation({
+      ...base,
+      context: () => ({}),
+      // @ts-expect-error facts need a reasons declaration to be checked against
+      reduce: () => ({ decision: 'x', facts: { lux: 1 }, actions: [] }),
     });
   });
 });

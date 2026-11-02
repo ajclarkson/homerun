@@ -18,7 +18,7 @@ export type FactValue = string | number | boolean | null;
 // cannot grow into a second `conditions` dump.
 export const MAX_FACTS = 8;
 
-const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_]*$/;
+export const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_]*$/;
 
 export interface ReasonDeclaration {
   readonly outcome: Outcome;
@@ -102,6 +102,22 @@ export function validateReasonDeclarations(automationId: string, reasons: unknow
 
 // ---------- Run-time enforcement ----------
 
+export const DECLARATION_PROBLEMS = ['undeclared_reason', 'missing_fact', 'undeclared_fact', 'invalid_fact_value'] as const;
+export type DeclarationProblem = (typeof DECLARATION_PROBLEMS)[number];
+
+// What a failed check reports. Structured on purpose: it becomes a `declaration_error` event,
+// which carries no free text.
+export class DeclarationError extends Error {
+  constructor(
+    public readonly problem: DeclarationProblem,
+    public readonly reason: unknown,
+    public readonly fact?: string,
+  ) {
+    super(`declared-reasons violation: ${problem} (reason ${JSON.stringify(reason)}${fact !== undefined ? `, fact ${JSON.stringify(fact)}` : ''})`);
+    this.name = 'DeclarationError';
+  }
+}
+
 export interface ResolvedReason {
   outcome: Outcome;
   facts?: Record<string, FactValue>;
@@ -116,37 +132,37 @@ function isFactValue(value: unknown): value is FactValue {
 
 function resolveFacts(reason: string, declared: readonly string[], given: unknown): Record<string, FactValue> | undefined {
   if (declared.length === 0) {
-    if (given !== undefined) throw new Error(`reason "${reason}" declares no facts but the decision supplied some`);
-    return undefined;
+    if (given === undefined) return undefined;
+    const first = typeof given === 'object' && given !== null ? Object.keys(given)[0] : undefined;
+    throw new DeclarationError('undeclared_fact', reason, first);
   }
   if (typeof given !== 'object' || given === null || Array.isArray(given)) {
-    throw new Error(`reason "${reason}" declares facts [${declared.join(', ')}] but the decision supplied none`);
+    throw new DeclarationError('missing_fact', reason, declared[0]);
   }
   const record = given as Record<string, unknown>;
-  const out: Record<string, FactValue> = {};
   for (const key of Object.keys(record)) {
-    if (!declared.includes(key)) throw new Error(`reason "${reason}": fact "${key}" is not declared`);
+    if (!declared.includes(key)) throw new DeclarationError('undeclared_fact', reason, key);
   }
+  const out: Record<string, FactValue> = {};
   for (const key of declared) {
     const value = record[key];
-    if (!isFactValue(value)) {
-      throw new Error(`reason "${reason}": fact "${key}" must be a string, finite number, boolean or null (got ${typeof value})`);
-    }
+    if (value === undefined) throw new DeclarationError('missing_fact', reason, key);
+    if (!isFactValue(value)) throw new DeclarationError('invalid_fact_value', reason, key);
     out[key] = value;
   }
   return out;
 }
 
-// Called by the pipeline on every decision from a declaring automation. Throws on an
-// undeclared reason or fact: the pipeline turns that into an `unhandled_error` abort so the
-// gap is visible, never a decision with a silently dropped explanation.
+// Called by the pipeline on every decision from a declaring automation. Throws a
+// DeclarationError; the pipeline reports it as a `declaration_error` event and still runs the
+// actions, because observability must never stop a real action.
 export function resolveDeclaredReason(
   reasons: ReasonDeclarations,
   decision: { reason?: unknown; facts?: unknown },
 ): ResolvedReason {
   const { reason } = decision;
   if (typeof reason !== 'string' || !Object.hasOwn(reasons, reason)) {
-    throw new Error(`reason ${JSON.stringify(reason)} is not declared`);
+    throw new DeclarationError('undeclared_reason', reason);
   }
   const spec = reasons[reason];
   const facts = resolveFacts(reason, spec.facts ?? [], decision.facts);

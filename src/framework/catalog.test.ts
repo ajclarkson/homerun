@@ -64,37 +64,51 @@ describe('CatalogPublisher', () => {
     expect(mqtt.publishAsync.mock.calls[0][0]).toBe('homerun/dev/catalog');
   });
 
-  it('publishes nothing when no automation declares reasons', () => {
+  it('publishes an empty catalogue at startup, so a stale retained copy is replaced', () => {
     registry.register(auto('x:heating'));
     make().start();
-    vi.advanceTimersByTime(1000);
-    expect(mqtt.publishAsync).not.toHaveBeenCalled();
+    expect(JSON.parse(mqtt.publishAsync.mock.calls[0][1]).automations).toEqual([]);
+    expect(validator.safeParse(JSON.parse(mqtt.publishAsync.mock.calls[0][1])).success).toBe(true);
   });
 
-  it('republishes once, debounced, after a reload that changes the catalogue', () => {
+  it('republishes once, debounced, after a reload that changes the catalogue', async () => {
     registry.register(declared('hall:lighting'));
     make().start();
     registry.unregister('hall:lighting');
     registry.register(declared('hall:lighting'));
     registry.register(declared('attic:lighting'));
-    vi.advanceTimersByTime(1000);
+    await vi.advanceTimersByTimeAsync(1000);
     expect(mqtt.publishAsync).toHaveBeenCalledTimes(2);
     expect(JSON.parse(mqtt.publishAsync.mock.calls[1][1]).automations).toHaveLength(2);
   });
 
-  it('sends nothing for a reload that leaves the catalogue identical', () => {
+  it('sends nothing for a reload that leaves the catalogue identical', async () => {
     registry.register(declared('hall:lighting'));
     make().start();
+    await vi.advanceTimersByTimeAsync(0);
     registry.register(declared('hall:lighting'));
-    vi.advanceTimersByTime(1000);
+    await vi.advanceTimersByTimeAsync(1000);
     expect(mqtt.publishAsync).toHaveBeenCalledTimes(1);
   });
 
-  it('publishes an emptied catalogue once one has been published, so the retained copy is not stale', () => {
+  it('retries after a failed publish instead of remembering it as sent', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mqtt.publishAsync.mockRejectedValueOnce(new Error('down'));
+    registry.register(declared('hall:lighting'));
+    const publisher = make();
+    publisher.start();
+    await vi.advanceTimersByTimeAsync(0);
+    publisher.publish();
+    expect(mqtt.publishAsync).toHaveBeenCalledTimes(2);
+    error.mockRestore();
+  });
+
+  it('publishes an emptied catalogue after one has been published', async () => {
     registry.register(declared('hall:lighting'));
     make().start();
+    await vi.advanceTimersByTimeAsync(0);
     registry.unregister('hall:lighting');
-    vi.advanceTimersByTime(1000);
+    await vi.advanceTimersByTimeAsync(1000);
     expect(JSON.parse(mqtt.publishAsync.mock.calls[1][1]).automations).toEqual([]);
   });
 

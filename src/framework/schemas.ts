@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { MAX_FACTS } from '../types/reasons.js';
+import { IDENTIFIER, MAX_FACTS, OUTCOMES } from '../types/reasons.js';
+import { BUTTON_GESTURES, TRIGGER_SUMMARY_TYPES } from '../types/triggers.js';
 
 // The JSON Schemas are the contract. They are authored here, written to `schemas/*.json` by
 // `npm run generate:schemas` (a test fails when the files drift), and the very same objects
@@ -13,7 +14,9 @@ export const HISTORY_SCHEMA_ID = 'home.history.v1';
 // not just in config.
 export const MAX_HISTORY_ENTRIES = 200;
 
-const IDENTIFIER_PATTERN = '^[A-Za-z][A-Za-z0-9_]*$';
+const IDENTIFIER_PATTERN = IDENTIFIER.source;
+
+export const HISTORY_KINDS = ['decision', 'abort', 'action_failed'] as const;
 
 const nonEmptyString = { type: 'string', minLength: 1 } as const;
 const factValue = { type: ['string', 'number', 'boolean', 'null'] } as const;
@@ -30,7 +33,7 @@ const catalogReason = {
   required: ['outcome', 'facts'],
   additionalProperties: false,
   properties: {
-    outcome: { enum: ['acted', 'declined', 'ignored'] },
+    outcome: { enum: [...OUTCOMES] },
     facts: {
       type: 'array',
       items: { type: 'string', pattern: IDENTIFIER_PATTERN },
@@ -76,13 +79,13 @@ const triggerSummary = {
   required: ['type'],
   additionalProperties: false,
   properties: {
-    type: { enum: ['state_changed', 'schedule', 'on_start', 'timer_expired', 'button', 'mqtt_in'] },
+    type: { enum: [...TRIGGER_SUMMARY_TYPES] },
     entity_id: { type: 'string' },
     to: { type: 'string' },
     from: { type: 'string' },
     cron: { type: 'string' },
     timerKey: { type: 'string' },
-    gesture: { enum: ['single_press', 'double_press', 'hold'] },
+    gesture: { enum: [...BUTTON_GESTURES] },
     button: { type: 'string' },
     topic: { type: 'string' },
   },
@@ -97,11 +100,11 @@ const historyEntry = {
     location: nonEmptyString,
     automation_id: nonEmptyString,
     subsystem: nonEmptyString,
-    kind: { enum: ['decision', 'abort', 'action_failed'] },
+    kind: { enum: [...HISTORY_KINDS] },
     decision: { type: 'string' },
     reason: { type: 'string' },
     // `ignored` decisions are never stored, so a consumer never has to render one.
-    outcome: { enum: ['acted', 'declined'] },
+    outcome: { enum: OUTCOMES.filter((o) => o !== 'ignored') },
     facts: flatRecord,
     trigger: triggerSummary,
     // Structured, never prose: abort_kind and entity for an abort; failure, action and entity

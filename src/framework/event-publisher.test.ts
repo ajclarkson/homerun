@@ -77,6 +77,7 @@ describe('EventPublisher — publishDecision', () => {
   });
 
   it('routes dry_run events to homerun/dev/* topics', async () => {
+    publisher = new EventPublisher(mqtt as unknown as MqttClient, { dryRun: true });
     publisher.publishDecision(makeDecisionEvent({ dry_run: true }));
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalledTimes(2));
 
@@ -145,6 +146,7 @@ describe('EventPublisher — publishActionEvent', () => {
   });
 
   it('routes dry_run action events to homerun/dev/events', async () => {
+    publisher = new EventPublisher(mqtt as unknown as MqttClient, { dryRun: true });
     publisher.publishActionEvent(makeDecisionEvent({ event_type: 'action_started', dry_run: true }));
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalled());
 
@@ -183,7 +185,7 @@ describe('EventPublisher — enabled: false', () => {
 
   beforeEach(() => {
     mqtt = makeMqtt();
-    publisher = new EventPublisher(mqtt as unknown as MqttClient, false);
+    publisher = new EventPublisher(mqtt as unknown as MqttClient, { enabled: false });
   });
 
   it('does not publish decision events to MQTT', () => {
@@ -250,7 +252,8 @@ describe('EventPublisher — publishLifecycle', () => {
   });
 
   it('routes dry_run lifecycle events to homerun/dev/* topics', async () => {
-    publisher.publishLifecycle('rescan_complete', 3, true);
+    publisher = new EventPublisher(mqtt as unknown as MqttClient, { dryRun: true });
+    publisher.publishLifecycle('rescan_complete', 3);
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalledTimes(2));
 
     expect(callForTopic(mqtt, 'homerun/dev/lifecycle')).toBeDefined();
@@ -260,7 +263,8 @@ describe('EventPublisher — publishLifecycle', () => {
   });
 
   it('includes dry_run flag in the lifecycle payload when true', async () => {
-    publisher.publishLifecycle('ha_reconnected', 2, true);
+    publisher = new EventPublisher(mqtt as unknown as MqttClient, { dryRun: true });
+    publisher.publishLifecycle('ha_reconnected', 2);
     await vi.waitFor(() => expect(mqtt.publishAsync).toHaveBeenCalled());
 
     const call = callForTopic(mqtt, 'homerun/dev/lifecycle')!;
@@ -353,7 +357,7 @@ describe('EventPublisher — history', () => {
 
   it('publishes retained location and house history, each validating against the schema file', () => {
     const mqtt = makeMqtt();
-    const publisher = new EventPublisher(mqtt as unknown as MqttClient, true, { size: 20, houseSize: 30 });
+    const publisher = new EventPublisher(mqtt as unknown as MqttClient, { history: { size: 20, houseSize: 30 }, historyDebounceMs: 0 });
     publisher.publishDecision(acted());
     for (const topic of ['homerun/parlour/history', 'homerun/history']) {
       const call = callForTopic(mqtt, topic);
@@ -362,16 +366,36 @@ describe('EventPublisher — history', () => {
     }
   });
 
-  it('publishes history when the ObsEvent stream is disabled', () => {
+  it('publishes no history when events.enabled is false, like the rest of the MQTT stream', () => {
     const mqtt = makeMqtt();
-    new EventPublisher(mqtt as unknown as MqttClient, false, { size: 20, houseSize: 30 }).publishDecision(acted());
-    expect(callForTopic(mqtt, 'homerun/parlour/history')).toBeDefined();
-    expect(callForTopic(mqtt, 'homerun/events')).toBeUndefined();
+    new EventPublisher(mqtt as unknown as MqttClient, { enabled: false, history: { size: 20, houseSize: 30 }, historyDebounceMs: 0 }).publishDecision(acted());
+    expect(mqtt.publishAsync).not.toHaveBeenCalled();
+  });
+
+  it('coalesces republishes per topic, always ending on the latest state, and flushes on demand', () => {
+    vi.useFakeTimers();
+    try {
+      const mqtt = makeMqtt();
+      const publisher = new EventPublisher(mqtt as unknown as MqttClient, { history: { size: 20, houseSize: 30 }, historyDebounceMs: 250 });
+      for (const n of [1, 2, 3]) publisher.publishDecision(acted({ decision: `d${n}` } as Partial<ObsEvent>));
+      expect(publishedTo(mqtt, 'homerun/parlour/history')).toHaveLength(0);
+      vi.advanceTimersByTime(250);
+      const sent = publishedTo(mqtt, 'homerun/parlour/history') as Array<{ entries: Array<{ decision: string }> }>;
+      expect(sent).toHaveLength(1);
+      expect(sent[0].entries.map((e) => e.decision)).toEqual(['d3', 'd2', 'd1']);
+      publisher.publishDecision(acted({ decision: 'd4' } as Partial<ObsEvent>));
+      publisher.flushHistory();
+      expect(publishedTo(mqtt, 'homerun/parlour/history')).toHaveLength(2);
+      vi.advanceTimersByTime(1000);
+      expect(publishedTo(mqtt, 'homerun/parlour/history')).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps separate locations apart and mixes them in the house history', () => {
     const mqtt = makeMqtt();
-    const publisher = new EventPublisher(mqtt as unknown as MqttClient, true, { size: 20, houseSize: 30 });
+    const publisher = new EventPublisher(mqtt as unknown as MqttClient, { history: { size: 20, houseSize: 30 }, historyDebounceMs: 0 });
     publisher.publishDecision(acted({ location: 'parlour' }));
     publisher.publishDecision(acted({ location: 'hall', automation_id: 'hall:lighting' }));
     expect(publishedTo(mqtt, 'homerun/hall/history').at(-1)).toMatchObject({ entries: [{ location: 'hall' }] });
@@ -380,7 +404,7 @@ describe('EventPublisher — history', () => {
 
   it('caps each buffer at its size, newest first', () => {
     const mqtt = makeMqtt();
-    const publisher = new EventPublisher(mqtt as unknown as MqttClient, true, { size: 2, houseSize: 3 });
+    const publisher = new EventPublisher(mqtt as unknown as MqttClient, { history: { size: 2, houseSize: 3 }, historyDebounceMs: 0 });
     for (const n of [1, 2, 3, 4]) publisher.publishDecision(acted({ decision: `d${n}` } as Partial<ObsEvent>));
     const entries = (publishedTo(mqtt, 'homerun/parlour/history').at(-1) as { entries: Array<{ decision: string }> }).entries;
     expect(entries.map((e) => e.decision)).toEqual(['d4', 'd3']);
@@ -389,7 +413,7 @@ describe('EventPublisher — history', () => {
 
   it('stores failed actions from publishActionEvent', () => {
     const mqtt = makeMqtt();
-    const publisher = new EventPublisher(mqtt as unknown as MqttClient, true, { size: 20, houseSize: 30 });
+    const publisher = new EventPublisher(mqtt as unknown as MqttClient, { history: { size: 20, houseSize: 30 }, historyDebounceMs: 0 });
     publisher.publishActionEvent({
       schema: 'home.events.v2', correlation_id: 'c', root_correlation_id: 'c', automation_id: 'parlour:lighting',
       location: 'parlour', subsystem: 'lighting', timestamp: new Date().toISOString(), event_type: 'action_result',
@@ -400,27 +424,25 @@ describe('EventPublisher — history', () => {
 
   it('does not publish for events that are not remembered', () => {
     const mqtt = makeMqtt();
-    new EventPublisher(mqtt as unknown as MqttClient, true, { size: 20, houseSize: 30 })
+    new EventPublisher(mqtt as unknown as MqttClient, { history: { size: 20, houseSize: 30 }, historyDebounceMs: 0 })
       .publishDecision(makeDecisionEvent({ outcome: 'ignored', reason: 'startup' } as Partial<ObsEvent>));
     expect(callForTopic(mqtt, 'homerun/parlour/history')).toBeUndefined();
   });
 
-  it('keeps dry runs in homerun/dev and separate from live buffers', () => {
+  it('keeps a dry run entirely in homerun/dev', () => {
     const mqtt = makeMqtt();
-    const publisher = new EventPublisher(mqtt as unknown as MqttClient, true, { size: 20, houseSize: 30 });
-    publisher.publishDecision(acted({ dry_run: true } as Partial<ObsEvent>));
+    new EventPublisher(mqtt as unknown as MqttClient, { history: { size: 20, houseSize: 30 }, dryRun: true, historyDebounceMs: 0 })
+      .publishDecision(acted({ dry_run: true } as Partial<ObsEvent>));
     expect(callForTopic(mqtt, 'homerun/dev/parlour/history')).toBeDefined();
     expect(callForTopic(mqtt, 'homerun/dev/history')).toBeDefined();
     expect(callForTopic(mqtt, 'homerun/parlour/history')).toBeUndefined();
     expect(callForTopic(mqtt, 'homerun/history')).toBeUndefined();
-    publisher.publishDecision(acted());
-    expect((publishedTo(mqtt, 'homerun/parlour/history').at(-1) as { entries: unknown[] }).entries).toHaveLength(1);
   });
 
   it('an invalid entry is logged and skipped without breaking the event or other listeners', () => {
     const mqtt = makeMqtt();
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const publisher = new EventPublisher(mqtt as unknown as MqttClient, true, { size: 20, houseSize: 30 });
+    const publisher = new EventPublisher(mqtt as unknown as MqttClient, { history: { size: 20, houseSize: 30 }, historyDebounceMs: 0 });
     const listener = vi.fn();
     publisher.subscribe(listener);
     publisher.publishDecision(acted({ facts: { nested: { a: 1 } } } as unknown as Partial<ObsEvent>));
@@ -476,8 +498,8 @@ describe('EventPublisher — seeding history from retained topics', () => {
       'homerun/parlour/history': payload([entry('parlour', 'old2'), entry('parlour', 'old1')]),
       'homerun/history': payload([entry('parlour', 'old2'), entry('parlour', 'old1')]),
     });
-    const publisher = new EventPublisher(mqtt as unknown as MqttClient, true, config);
-    await publisher.seedHistory(false, 0);
+    const publisher = new EventPublisher(mqtt as unknown as MqttClient, { history: config, historyDebounceMs: 0 });
+    await publisher.seedHistory(0);
     publisher.publishDecision(makeDecisionEvent({ outcome: 'acted', hasAction: true, decision: 'new' } as Partial<ObsEvent>));
     expect(lastPublished(mqtt, 'homerun/parlour/history').entries.map((e) => e.decision)).toEqual(['new', 'old2', 'old1']);
     expect(lastPublished(mqtt, 'homerun/history').entries.map((e) => e.decision)).toEqual(['new', 'old2', 'old1']);
@@ -485,8 +507,8 @@ describe('EventPublisher — seeding history from retained topics', () => {
 
   it('trims a seed to the configured size', async () => {
     const mqtt = makeSeedMqtt({ 'homerun/parlour/history': payload([1, 2, 3, 4].map((n) => entry('parlour', `d${n}`))) });
-    const publisher = new EventPublisher(mqtt as unknown as MqttClient, true, config);
-    await publisher.seedHistory(false, 0);
+    const publisher = new EventPublisher(mqtt as unknown as MqttClient, { history: config, historyDebounceMs: 0 });
+    await publisher.seedHistory(0);
     publisher.publishDecision(makeDecisionEvent({ outcome: 'acted', hasAction: true, decision: 'new' } as Partial<ObsEvent>));
     expect(lastPublished(mqtt, 'homerun/parlour/history').entries).toHaveLength(3);
   });
@@ -494,8 +516,8 @@ describe('EventPublisher — seeding history from retained topics', () => {
   it('starts empty, with a warning, when a seed is malformed', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const mqtt = makeSeedMqtt({ 'homerun/parlour/history': '{not json' });
-    const publisher = new EventPublisher(mqtt as unknown as MqttClient, true, config);
-    await publisher.seedHistory(false, 0);
+    const publisher = new EventPublisher(mqtt as unknown as MqttClient, { history: config, historyDebounceMs: 0 });
+    await publisher.seedHistory(0);
     publisher.publishDecision(makeDecisionEvent({ outcome: 'acted', hasAction: true } as Partial<ObsEvent>));
     expect(lastPublished(mqtt, 'homerun/parlour/history').entries).toHaveLength(1);
     expect(warn).toHaveBeenCalled();
@@ -504,8 +526,8 @@ describe('EventPublisher — seeding history from retained topics', () => {
 
   it('starts empty when nothing is retained', async () => {
     const mqtt = makeSeedMqtt({});
-    const publisher = new EventPublisher(mqtt as unknown as MqttClient, true, config);
-    await publisher.seedHistory(false, 0);
+    const publisher = new EventPublisher(mqtt as unknown as MqttClient, { history: config, historyDebounceMs: 0 });
+    await publisher.seedHistory(0);
     publisher.publishDecision(makeDecisionEvent({ outcome: 'acted', hasAction: true } as Partial<ObsEvent>));
     expect(lastPublished(mqtt, 'homerun/parlour/history').entries).toHaveLength(1);
   });
@@ -517,15 +539,15 @@ describe('EventPublisher — seeding history from retained topics', () => {
       'homerun/dev/parlour/history': payload([entry('parlour', 'dev')]),
     };
     const live = makeSeedMqtt(retained);
-    const livePublisher = new EventPublisher(live as unknown as MqttClient, true, config);
-    await livePublisher.seedHistory(false, 0);
+    const livePublisher = new EventPublisher(live as unknown as MqttClient, { history: config, historyDebounceMs: 0 });
+    await livePublisher.seedHistory(0);
     livePublisher.publishDecision(makeDecisionEvent({ outcome: 'acted', hasAction: true, decision: 'new' } as Partial<ObsEvent>));
     expect(lastPublished(live, 'homerun/parlour/history').entries.map((e) => e.decision)).toEqual(['new', 'live']);
     expect(live.publishAsync.mock.calls.map((c: unknown[]) => c[0])).not.toContain('homerun/dev/history');
 
     const dry = makeSeedMqtt(retained);
-    const dryPublisher = new EventPublisher(dry as unknown as MqttClient, true, config);
-    await dryPublisher.seedHistory(true, 0);
+    const dryPublisher = new EventPublisher(dry as unknown as MqttClient, { history: config, dryRun: true, historyDebounceMs: 0 });
+    await dryPublisher.seedHistory(0);
     dryPublisher.publishDecision(makeDecisionEvent({ outcome: 'acted', hasAction: true, decision: 'new', dry_run: true } as Partial<ObsEvent>));
     expect(lastPublished(dry, 'homerun/dev/parlour/history').entries.map((e) => e.decision)).toEqual(['new', 'dev']);
     expect(lastPublished(dry, 'homerun/dev/history').entries.map((e) => e.decision)).toEqual(['new', 'dev_house']);
@@ -533,14 +555,20 @@ describe('EventPublisher — seeding history from retained topics', () => {
 
   it('unsubscribes and removes its listener when done', async () => {
     const mqtt = makeSeedMqtt({});
-    await new EventPublisher(mqtt as unknown as MqttClient, true, config).seedHistory(false, 0);
+    await new EventPublisher(mqtt as unknown as MqttClient, { history: config, historyDebounceMs: 0 }).seedHistory(0);
     expect(mqtt.unsubscribeAsync).toHaveBeenCalled();
     expect(mqtt.listenerCount('message')).toBe(0);
   });
 
+  it('does not seed when events.enabled is false', async () => {
+    const mqtt = makeSeedMqtt({});
+    await new EventPublisher(mqtt as unknown as MqttClient, { enabled: false, history: config }).seedHistory(0);
+    expect(mqtt.subscribeAsync).not.toHaveBeenCalled();
+  });
+
   it('does nothing when history is off', async () => {
     const mqtt = makeSeedMqtt({});
-    await new EventPublisher(mqtt as unknown as MqttClient).seedHistory(false, 0);
+    await new EventPublisher(mqtt as unknown as MqttClient).seedHistory(0);
     expect(mqtt.subscribeAsync).not.toHaveBeenCalled();
   });
 
@@ -548,7 +576,7 @@ describe('EventPublisher — seeding history from retained topics', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const mqtt = makeSeedMqtt({});
     mqtt.subscribeAsync.mockRejectedValue(new Error('denied'));
-    await expect(new EventPublisher(mqtt as unknown as MqttClient, true, config).seedHistory(false, 0)).resolves.toBeUndefined();
+    await expect(new EventPublisher(mqtt as unknown as MqttClient, { history: config, historyDebounceMs: 0 }).seedHistory(0)).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });

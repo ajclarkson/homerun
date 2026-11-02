@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { defineAutomation } from './automation.js';
-import { resolveDeclaredReason, validateReasonDeclarations } from './reasons.js';
+import { DeclarationError, resolveDeclaredReason, validateReasonDeclarations } from './reasons.js';
 import type { ReasonDeclarations } from './reasons.js';
 
 const base = { id: 'room:lighting', location: 'room', subsystem: 'lighting', triggers: [{ type: 'on_start' as const }] };
@@ -61,20 +61,27 @@ describe('resolveDeclaredReason — run-time enforcement', () => {
   });
 
   it.each([
-    ['an undeclared reason', { reason: 'lights_off' }, /not declared/],
-    ['a missing reason', {}, /not declared/],
-    ['an inherited property name as reason', { reason: 'toString' }, /not declared/],
-    ['an undeclared fact', { reason: 'lux_high', facts: { lux: 1, threshold: 2, extra: 3 } }, /"extra" is not declared/],
-    ['a missing fact', { reason: 'lux_high', facts: { lux: 1 } }, /"threshold" must be/],
-    ['facts missing entirely', { reason: 'lux_high' }, /supplied none/],
-    ['facts for a reason that declares none', { reason: 'lights_on', facts: { lux: 1 } }, /declares no facts/],
-    ['a NaN fact', { reason: 'lux_high', facts: { lux: NaN, threshold: 2 } }, /finite number/],
-    ['an Infinity fact', { reason: 'lux_high', facts: { lux: Infinity, threshold: 2 } }, /finite number/],
-    ['an object fact', { reason: 'lux_high', facts: { lux: { a: 1 }, threshold: 2 } }, /"lux" must be/],
-    ['an array fact', { reason: 'lux_high', facts: { lux: [1], threshold: 2 } }, /"lux" must be/],
-    ['an undefined fact', { reason: 'lux_high', facts: { lux: undefined, threshold: 2 } }, /"lux" must be/],
-  ])('throws on %s', (_name, decision, message) => {
-    expect(() => resolveDeclaredReason(reasons, decision)).toThrow(message);
+    ['an undeclared reason', { reason: 'lights_off' }, 'undeclared_reason', undefined],
+    ['a missing reason', {}, 'undeclared_reason', undefined],
+    ['an inherited property name as reason', { reason: 'toString' }, 'undeclared_reason', undefined],
+    ['an undeclared fact', { reason: 'lux_high', facts: { lux: 1, threshold: 2, extra: 3 } }, 'undeclared_fact', 'extra'],
+    ['a missing fact', { reason: 'lux_high', facts: { lux: 1 } }, 'missing_fact', 'threshold'],
+    ['an undefined fact', { reason: 'lux_high', facts: { lux: undefined, threshold: 2 } }, 'missing_fact', 'lux'],
+    ['facts missing entirely', { reason: 'lux_high' }, 'missing_fact', 'lux'],
+    ['facts for a reason that declares none', { reason: 'lights_on', facts: { lux: 1 } }, 'undeclared_fact', 'lux'],
+    ['a NaN fact', { reason: 'lux_high', facts: { lux: NaN, threshold: 2 } }, 'invalid_fact_value', 'lux'],
+    ['an Infinity fact', { reason: 'lux_high', facts: { lux: Infinity, threshold: 2 } }, 'invalid_fact_value', 'lux'],
+    ['an object fact', { reason: 'lux_high', facts: { lux: { a: 1 }, threshold: 2 } }, 'invalid_fact_value', 'lux'],
+    ['an array fact', { reason: 'lux_high', facts: { lux: [1], threshold: 2 } }, 'invalid_fact_value', 'lux'],
+  ])('throws a structured DeclarationError on %s', (_name, decision, problem, fact) => {
+    expect.assertions(3);
+    try {
+      resolveDeclaredReason(reasons, decision);
+    } catch (err) {
+      expect(err).toBeInstanceOf(DeclarationError);
+      expect((err as DeclarationError).problem).toBe(problem);
+      expect((err as DeclarationError).fact).toBe(fact);
+    }
   });
 });
 

@@ -467,18 +467,36 @@ describe('runPipeline — declared reasons', () => {
     expect(published(deps).conditions).toEqual({ everything: true });
   });
 
+  const cancel = { type: 'timer.cancel' as const, timerKey: 'k' };
+
   it.each([
-    ['an undeclared reason', { decision: 'x', reason: 'lights_off', actions: [] }],
-    ['no reason at all', { decision: 'x', actions: [] }],
-    ['an undeclared fact', { decision: 'x', reason: 'lux_high', facts: { lux: 1, threshold: 2, extra: 3 }, actions: [] }],
-    ['a non-primitive fact', { decision: 'x', reason: 'lux_high', facts: { lux: [1], threshold: 2 }, actions: [] }],
-    ['a non-finite fact', { decision: 'x', reason: 'lux_high', facts: { lux: NaN, threshold: 2 }, actions: [] }],
-  ])('aborts with unhandled_error on %s, and runs no actions', async (_name, result) => {
+    ['an undeclared reason', { decision: 'x', reason: 'lights_off' }, { problem: 'undeclared_reason', reason: 'lights_off' }],
+    ['no reason at all', { decision: 'x' }, { problem: 'undeclared_reason' }],
+    ['an undeclared fact', { decision: 'x', reason: 'lux_high', facts: { lux: 1, threshold: 2, extra: 3 } }, { problem: 'undeclared_fact', reason: 'lux_high', fact: 'extra' }],
+    ['a missing fact', { decision: 'x', reason: 'lux_high', facts: { lux: 1 } }, { problem: 'missing_fact', reason: 'lux_high', fact: 'threshold' }],
+    ['a non-primitive fact', { decision: 'x', reason: 'lux_high', facts: { lux: [1], threshold: 2 } }, { problem: 'invalid_fact_value', reason: 'lux_high', fact: 'lux' }],
+    ['a NaN fact', { decision: 'x', reason: 'lux_high', facts: { lux: NaN, threshold: 2 } }, { problem: 'invalid_fact_value', reason: 'lux_high', fact: 'lux' }],
+  ])('still runs the actions on %s, publishing the undeclared shape plus a declaration_error', async (_name, result, expected) => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const deps = await run(makeAutomation({ reasons, reduce: vi.fn().mockReturnValue({ ...result, actions: [{ type: 'timer.cancel', timerKey: 'k' }] }) }));
-    expect(published(deps)).toMatchObject({ event_type: 'abort', abort_kind: 'unhandled_error' });
-    expect(deps.actionRuntime.execute).not.toHaveBeenCalled();
+    const deps = await run(makeAutomation({ reasons, reduce: vi.fn().mockReturnValue({ ...result, actions: [cancel] }) }));
+    expect(deps.actionRuntime.execute).toHaveBeenCalledWith([cancel], expect.anything());
+    const decision = published(deps);
+    expect(decision).toMatchObject({ event_type: 'decision', hasAction: true });
+    expect(decision).not.toHaveProperty('outcome');
+    expect(decision).not.toHaveProperty('facts');
+    const [declarationError] = deps.eventPublisher.publishActionEvent.mock.calls[0];
+    expect(declarationError).toMatchObject({ event_type: 'declaration_error', automation_id: 'parlour:lighting', ...expected });
+    expect(Object.keys(declarationError).sort()).toEqual(
+      ['automation_id', 'correlation_id', 'location', 'root_correlation_id', 'schema', 'subsystem', 'timestamp', 'event_type', 'problem', ...Object.keys(expected).filter((k) => k !== 'problem')].sort(),
+    );
     expect(error).toHaveBeenCalledWith(expect.stringContaining('parlour:lighting'), expect.any(String));
+    error.mockRestore();
+  });
+
+  it('does not echo a reason that is not identifier-shaped', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const deps = await run(makeAutomation({ reasons, reduce: vi.fn().mockReturnValue({ decision: 'x', reason: 'free text here', actions: [] }) }));
+    expect(deps.eventPublisher.publishActionEvent.mock.calls[0][0]).not.toHaveProperty('reason');
     error.mockRestore();
   });
 });

@@ -3,6 +3,7 @@ import type { Automation } from '../types/automation.js';
 import type { Outcome } from '../types/reasons.js';
 import type { AutomationRegistry } from './registry.js';
 import { CATALOG_SCHEMA_ID, assertValidCatalog } from './schemas.js';
+import { namespace } from './namespace.js';
 
 export interface CatalogReason {
   outcome: Outcome;
@@ -31,7 +32,7 @@ export function catalogReasons(automation: Automation<unknown>): Record<string, 
   );
 }
 
-// Only automations that declare reasons appear: the catalogue answers "what can this
+// Only automations that declare reasons appear (so a consumer with none gets an empty list): the catalogue answers "what can this
 // automation say about itself", and an undeclared automation says nothing. Sorted so the same
 // registry always serialises identically, which is what lets the publisher skip no-op republishes.
 export function buildCatalog(automations: readonly Automation<unknown>[]): Catalog {
@@ -66,18 +67,19 @@ export class CatalogPublisher {
     });
   }
 
+  // Always sends on the first call, even an empty catalogue: after a restart that dropped the
+  // last declaration, a stale retained copy would otherwise outlive it. `lastPublished` is set
+  // only once the broker accepted the message, so a failure is retried by the next trigger.
   publish(): void {
     try {
       const catalog = buildCatalog(this.registry.getAll());
-      // A consumer with no declarations never sees a `homerun/catalog` topic appear. Once one
-      // has been published, an emptied catalogue is still sent so the retained copy is not stale.
-      if (catalog.automations.length === 0 && this.lastPublished === undefined) return;
       assertValidCatalog(catalog);
       const payload = JSON.stringify(catalog);
       if (payload === this.lastPublished) return;
-      this.lastPublished = payload;
-      const topic = `${this.dryRun ? 'homerun/dev' : 'homerun'}/catalog`;
-      this.mqtt.publishAsync(topic, payload, { retain: true }).catch((err: unknown) => {
+      const topic = `${namespace(this.dryRun)}/catalog`;
+      this.mqtt.publishAsync(topic, payload, { retain: true }).then(() => {
+        this.lastPublished = payload;
+      }).catch((err: unknown) => {
         console.error(`[CatalogPublisher] MQTT publish failed on ${topic}:`, err);
       });
     } catch (err) {

@@ -120,4 +120,17 @@ describe('AutomationRegistry', () => {
     expect(cb1).toHaveBeenCalledOnce();
     expect(cb2).toHaveBeenCalledOnce();
   });
+
+  it('rejects the reserved dry-run location "dev"', () => {
+    const reg = new AutomationRegistry();
+    expect(() => reg.register({ ...makeAutomation('dev:lighting'), location: 'dev' })).toThrow(/reserved/);
+    expect(reg.getAll()).toHaveLength(0);
+  });
+
+  it('rejects an automation whose reason declarations are malformed, leaving the registry unchanged', () => {
+    const reg = new AutomationRegistry();
+    const bad = { ...makeAutomation('a:b'), reasons: { r: { outcome: 'maybe' } } } as unknown as Automation<unknown>;
+    expect(() => reg.register(bad)).toThrow(/invalid reasons/);
+    expect(reg.getAll()).toHaveLength(0);
+  });
 });

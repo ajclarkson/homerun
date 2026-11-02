@@ -93,13 +93,19 @@ export type DeclaredAutomation<C, R extends ReasonDeclarations> =
     reduce: (ctx: C) => DeclaredDecision<R>;
   };
 
+// Without `reasons`, `facts` has nothing to be checked against, so returning it is a compile
+// error rather than a value that is silently dropped.
+export type UndeclaredAutomation<C> = Omit<Automation<C>, 'reasons' | 'reduce'> & {
+  reduce: (ctx: C) => Omit<Decision, 'facts'> & { facts?: never };
+};
+
 // Identity function — provides type inference on C so the reduce argument
 // is typed correctly without the user annotating the context shape explicitly. `const R`
 // keeps the declared keys as literals so they can narrow `reason`.
 export function defineAutomation<C, const R extends ReasonDeclarations>(
   automation: DeclaredAutomation<C, R>,
 ): Automation<C>;
-export function defineAutomation<C>(automation: Omit<Automation<C>, 'reasons'>): Automation<C>;
+export function defineAutomation<C>(automation: UndeclaredAutomation<C>): Automation<C>;
 export function defineAutomation<C>(automation: Automation<C>): Automation<C> {
   if (automation.reasons !== undefined) {
     validateReasonDeclarations(automation.id, automation.reasons);
