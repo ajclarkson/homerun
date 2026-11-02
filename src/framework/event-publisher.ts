@@ -1,6 +1,11 @@
 import type { MqttClient } from 'mqtt';
 import type { Action } from '../types/actions.js';
 import type { TriggerSummary } from '../types/triggers.js';
+import type { FactValue, Outcome } from '../types/reasons.js';
+import { HistoryBuffer, classify, parseSeed } from './history.js';
+import type { HistoryConfig, HistoryEntry } from './history.js';
+import { HISTORY_SCHEMA_ID, assertValidHistory } from './schemas.js';
+import { readRetained } from './retained-reader.js';
 
 type ObsEventBase = {
   schema: 'home.events.v2';
@@ -28,6 +33,11 @@ export type ObsEvent = ObsEventBase & (
       decision: string;
       reason?: string;
       conditions?: Record<string, unknown>;
+      // Present only for automations that declare `reasons`; both come from the declaration
+      // and are validated before they get here. Absent for everyone else, so an undeclared
+      // automation's payload is unchanged.
+      outcome?: Outcome;
+      facts?: Record<string, FactValue>;
       actions: Action[];
       // Framework-computed (actions.length > 0) — structurally answers "did this decision
       // result in at least one action" without parsing free-text decision/reason strings.
@@ -72,6 +82,9 @@ export interface LifecycleEvent {
 
 export class EventPublisher {
   private readonly listeners: Array<(event: ObsEvent) => void> = [];
+  // Keyed by namespace then location, so a dry run can never touch the live buffers.
+  private readonly locationHistory = new Map<string, Map<string, HistoryBuffer>>();
+  private readonly houseHistory = new Map<string, HistoryBuffer>();
 
   // `enabled` gates MQTT publishing of decision/action ObsEvents only (mirrors metrics.enabled;
   // see #144) — publishLifecycle (status/online heartbeat) is unaffected, and listeners (the
@@ -80,6 +93,9 @@ export class EventPublisher {
   constructor(
     private readonly mqtt: MqttClient,
     private readonly enabled: boolean = true,
+    // Off unless configured: history adds retained topics other consumers did not ask for.
+    // Independent of `enabled`, which gates only the ObsEvent stream.
+    private readonly history?: HistoryConfig,
   ) {}
 
   subscribe(listener: (event: ObsEvent) => void): () => void {
@@ -99,6 +115,7 @@ export class EventPublisher {
         this.publish(`${ns}/${event.location}/${event.subsystem}/decision`, payload, true);
       }
     }
+    this.recordHistory(event);
     this.notifyListeners(event);
   }
 
@@ -110,6 +127,7 @@ export class EventPublisher {
         this.publish(`${ns}/events`, payload, false);
       }
     }
+    this.recordHistory(event);
     this.notifyListeners(event);
   }
 
@@ -125,6 +143,80 @@ export class EventPublisher {
     const payload = JSON.stringify(event);
     this.publish(`${ns}/lifecycle`, payload, false);
     this.publish(`${ns}/status`, JSON.stringify({ status: 'online', automation_count: automationCount, timestamp: event.timestamp }), true);
+  }
+
+  // Rebuilds the buffers from the retained topics so history survives a restart. Call once,
+  // before the engine starts, so no live entry can race the seed. A malformed or missing seed
+  // means an empty buffer, never a failed startup. `dryRun` selects the namespace to read,
+  // keeping a dry run on `homerun/dev/...` end to end.
+  async seedHistory(dryRun: boolean, settleMs = 1000): Promise<void> {
+    const config = this.history;
+    if (!config) return;
+    const ns = dryRun ? 'homerun/dev' : 'homerun';
+    const houseTopic = `${ns}/history`;
+    const locationTopic = new RegExp(`^${ns}/([^/]+)/history$`);
+    // In the live namespace `homerun/+/history` also matches the dry-run house topic
+    // (`homerun/dev/history`), so `dev` is reserved and never read as a location.
+    const locationOf = (topic: string): string | undefined => {
+      const location = locationTopic.exec(topic)?.[1];
+      return location !== undefined && (dryRun || location !== 'dev') ? location : undefined;
+    };
+    try {
+      const found = await readRetained(
+        this.mqtt, [houseTopic, `${ns}/+/history`],
+        (t) => t === houseTopic || locationOf(t) !== undefined, settleMs,
+      );
+      for (const [topic, raw] of found) this.applySeed(ns, topic, raw, config, locationOf(topic));
+    } catch (err) {
+      console.warn('[EventPublisher] could not read retained history, starting empty:', err);
+    }
+  }
+
+  private applySeed(ns: string, topic: string, raw: string, config: HistoryConfig, location?: string): void {
+    const seed = parseSeed(topic, raw, location);
+    if (!seed) return;
+    const buffer = location === undefined
+      ? this.bufferFor(this.houseHistory, ns, config.houseSize)
+      : this.bufferFor(this.locationMap(ns), location, config.size);
+    buffer.load(seed.entries);
+  }
+
+  private locationMap(ns: string): Map<string, HistoryBuffer> {
+    let map = this.locationHistory.get(ns);
+    if (!map) { map = new Map(); this.locationHistory.set(ns, map); }
+    return map;
+  }
+
+  private bufferFor(map: Map<string, HistoryBuffer>, key: string, size: number): HistoryBuffer {
+    let buffer = map.get(key);
+    if (!buffer) { buffer = new HistoryBuffer(size); map.set(key, buffer); }
+    return buffer;
+  }
+
+  // History is a side channel: a classification, schema or publish failure is logged and the
+  // pipeline carries on, exactly like serialization above.
+  private recordHistory(event: ObsEvent): void {
+    const config = this.history;
+    if (!config) return;
+    try {
+      const entry = classify(event);
+      if (!entry) return;
+      // Check the entry before it can enter either buffer: a bad entry would otherwise sit in
+      // memory and be retained until the next restart.
+      assertValidHistory({ schema: HISTORY_SCHEMA_ID, entries: [entry] });
+      const ns = event.dry_run ? 'homerun/dev' : 'homerun';
+      const locationBuffer = this.bufferFor(this.locationMap(ns), entry.location, config.size);
+      const houseBuffer = this.bufferFor(this.houseHistory, ns, config.houseSize);
+      this.store(locationBuffer, `${ns}/${entry.location}/history`, entry);
+      this.store(houseBuffer, `${ns}/history`, entry);
+    } catch (err) {
+      console.error(`[EventPublisher] history skipped for ${event.event_type} from ${event.automation_id}:`, err);
+    }
+  }
+
+  private store(buffer: HistoryBuffer, topic: string, entry: HistoryEntry): void {
+    buffer.push(entry);
+    this.publish(topic, JSON.stringify(buffer.payload()), true);
   }
 
   private publish(topic: string, payload: string, retain: boolean): void {

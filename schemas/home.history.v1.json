@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "home.history.v1",
+  "description": "Newest-first meaningful events for one location or the whole house. Published retained on <ns>/{location}/history and <ns>/history.",
+  "type": "object",
+  "required": [
+    "schema",
+    "entries"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "home.history.v1"
+    },
+    "entries": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "required": [
+          "ts",
+          "location",
+          "automation_id",
+          "subsystem",
+          "kind"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "ts": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "location": {
+            "type": "string",
+            "minLength": 1
+          },
+          "automation_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "subsystem": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "enum": [
+              "decision",
+              "abort",
+              "action_failed"
+            ]
+          },
+          "decision": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "acted",
+              "declined"
+            ]
+          },
+          "facts": {
+            "type": "object",
+            "propertyNames": {
+              "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+            },
+            "additionalProperties": {
+              "type": [
+                "string",
+                "number",
+                "boolean",
+                "null"
+              ]
+            },
+            "maxProperties": 8
+          },
+          "trigger": {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "enum": [
+                  "state_changed",
+                  "schedule",
+                  "on_start",
+                  "timer_expired",
+                  "button",
+                  "mqtt_in"
+                ]
+              },
+              "entity_id": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "from": {
+                "type": "string"
+              },
+              "cron": {
+                "type": "string"
+              },
+              "timerKey": {
+                "type": "string"
+              },
+              "gesture": {
+                "enum": [
+                  "single_press",
+                  "double_press",
+                  "hold"
+                ]
+              },
+              "button": {
+                "type": "string"
+              },
+              "topic": {
+                "type": "string"
+              }
+            }
+          },
+          "detail": {
+            "type": "object",
+            "propertyNames": {
+              "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+            },
+            "additionalProperties": {
+              "type": [
+                "string",
+                "number",
+                "boolean",
+                "null"
+              ]
+            },
+            "maxProperties": 8
+          }
+        }
+      }
+    }
+  }
+}

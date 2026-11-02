@@ -1,10 +1,11 @@
 {
   "name": "@ajclarkson/homerun",
   "type": "module",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "TypeScript automation framework for Home Assistant",
   "files": [
-    "dist"
+    "dist",
+    "schemas"
   ],
   "main": "./dist/src/lib.js",
   "types": "./dist/src/lib.d.ts",
@@ -13,6 +14,7 @@
       "types": "./dist/src/lib.d.ts",
       "default": "./dist/src/lib.js"
     },
+    "./schemas/*": "./schemas/*",
     "./testing": {
       "types": "./dist/src/testing.d.ts",
       "default": "./dist/src/testing.js"
@@ -20,9 +22,10 @@
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "test": "vitest",
     "test:run": "vitest run",
+    "generate:schemas": "tsx scripts/generate-schemas.ts",
     "generate:ha-types": "tsx scripts/generate-ha-types.ts",
     "generate:ha-types:compiled": "homerun-generate-ha-types",
     "generate:ha-services": "tsx scripts/generate-ha-services.ts",

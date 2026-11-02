@@ -15,12 +15,15 @@ interface Decision {
   // so this is "for free" for most automations — only set it explicitly to trim or reshape what
   // gets published (e.g. a context object holding something not worth publishing wholesale).
   conditions?: Record<string, unknown>;
+  // Only with `reasons` declared on the automation: typed values for that reason's declared keys.
+  facts?: Record<string, string | number | boolean | null>;
 }
 ```
 
 Every pipeline run publishes an `ObsEvent` (`schema: 'home.events.v2'`) to `homerun/events`, and — for `decision`/`abort` only — a retained snapshot to `homerun/{location}/{subsystem}/decision`. It's a discriminated union on `event_type`, not one flat shape:
 
 - `decision` — carries `trigger` (a trimmed summary of the real trigger — `{ type, entity_id?, to?, from?, cron?, ... }` depending on trigger type), `decision`/`reason`/`conditions` from the reducer, `actions`, and `hasAction: boolean` (framework-computed from `actions.length > 0` — filter on this, not on parsing `decision` strings, to find every decision that resulted in at least one action).
+- On a `decision`, `outcome` (`acted` / `declined` / `ignored`, copied from the automation's `reasons` declaration) and `facts` appear only for automations that declare `reasons`; for everyone else the payload is unchanged. See the README section "Declared reasons, catalogue and history".
 - `abort` — carries `trigger` and `abort_kind: 'disabled' | 'unhandled_error' | 'guard' | 'unavailable_input'` (`'guard'` covers every author-triggered `abort()` call; `'unavailable_input'` is `requireState()`/`requireNumericState()` detecting a missing entity, with `entity` set to which one; `reason` on top of that is whatever string `abort()` was given, when applicable).
 - `action_started` / `action_result` — one pair per action in the plan, each carrying the single `action` it's about (not an array — always exactly one). `action_result` carries `status: 'ok' | 'error'` and, on failure, `error` with the detail. Emitted as two separate wire events deliberately: a `action_started` with no matching `action_result` is itself a signal (a hung HA call, a crash mid-action).
 - `action_ack_timeout` — opt-in (`commandAck.enabled`, see below), fires when a dispatched `ha.call_service`'s expected state/attribute change never arrives within `commandAck.timeoutMs`. Carries `action`, `entity`, and `expected` (the field/attribute → value map that was never satisfied). Arrives well after that run's own `action_result: 'ok'` — that only confirms HA accepted the WebSocket call, not that the device responded — so it can't be folded into that event; it's a separate, later-arriving signal correlated back via the same `correlation_id`.
@@ -37,10 +40,13 @@ All observability events are published under the `homerun/` namespace:
 |-------|----------|---------|
 | `homerun/events` | No | Event bus — every decision, abort, and action event |
 | `homerun/{location}/{subsystem}/decision` | Yes | Latest decision snapshot per automation |
+| `homerun/catalog` | Yes | Declared reasons per automation (`home.catalog.v1`); only when some automation declares reasons |
+| `homerun/{location}/history` | Yes | Newest-first meaningful events for a location (`home.history.v1`); only when `history` is configured |
+| `homerun/history` | Yes | The same, house-wide |
 | `homerun/dev/events` | No | Same as above but when `DRY_RUN=true` |
 | `homerun/dev/{location}/{subsystem}/decision` | Yes | Same as above but when `DRY_RUN=true` |
 
-Dry-run events are routed to `homerun/dev/*` so they cannot overwrite retained live decision state.
+Dry-run events (including the catalogue and history) are routed to `homerun/dev/*` so they cannot overwrite retained live decision state.
 
 ## Observability: Prometheus vs ObsEvent
 

@@ -24,6 +24,10 @@ events:
                   # The /events SSE endpoint keeps working either way — this only affects the
                   # MQTT stream (homerun/events, homerun/{location}/{subsystem}/decision).
 
+# history:           # off unless present. Keeps a retained, newest-first record of meaningful
+#   size: 20         # events per location (homerun/{location}/history) and house-wide
+#   houseSize: 30    # (homerun/history). 1 to 200 each. Re-seeded from the broker on start.
+
 commandAck:
   enabled: false   # set to true to flag ha.call_service dispatches whose expected state/attribute
                    # change never arrives — a real signal (device unreachable, mesh failure, HA

@@ -13,6 +13,7 @@ import { runPipeline } from './framework/pipeline.js';
 import { ApiServer } from './framework/api-server.js';
 import { PromMetricsBackend } from './framework/metrics-prom.js';
 import { NoopMetricsBackend } from './framework/metrics.js';
+import { CatalogPublisher } from './framework/catalog.js';
 
 process.on('uncaughtException', (err) => {
   console.error('[homerun] uncaughtException:', err);
@@ -43,7 +44,9 @@ await new Promise<void>((resolve, reject) => {
 //    `engine` is assigned before any timer can fire.
 const haClient = new HAClient();
 const registry = new AutomationRegistry();
-const eventPublisher = new EventPublisher(mqtt, config.events.enabled);
+const eventPublisher = new EventPublisher(mqtt, config.events.enabled, config.history);
+// Seed before anything can publish, so the first live entry lands on top of the restored history.
+await eventPublisher.seedHistory(dryRun);
 let engine!: TriggerEngine;
 const timerManager = new TimerManager((e) => engine.dispatch(e));
 const actionRuntime = new ActionRuntime({
@@ -63,6 +66,7 @@ await rescanAutomations(automationsDir, registry);
 const initialCount = registry.getAll().length;
 metricsBackend.setGauge('homerun_automations_loaded', initialCount);
 console.log(`[homerun] loaded ${initialCount} automation(s)`);
+if (config.events.enabled) new CatalogPublisher(mqtt, registry, dryRun).start();
 
 // 4. Wire up the engine and scheduler.
 //    Track in-flight pipelines so graceful shutdown can drain before exit.

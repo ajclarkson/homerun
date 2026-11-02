@@ -428,3 +428,92 @@ describe('runPipeline — metrics', () => {
     await expect(runPipeline(auto, onStartEvent, ha as never, deps as never)).resolves.toBeUndefined();
   });
 });
+
+// ---------- Declared reasons ----------
+
+describe('runPipeline — declared reasons', () => {
+  const reasons = {
+    lux_high: { outcome: 'declined', facts: ['lux', 'threshold'] },
+    lights_on: { outcome: 'acted' },
+  } as const;
+
+  function run(automation: Automation<unknown>) {
+    const deps = makeDeps();
+    return runPipeline(automation, onStartEvent, makeHAClient() as never, deps as never).then(() => deps);
+  }
+  const published = (deps: ReturnType<typeof makeDeps>) => deps.eventPublisher.publishDecision.mock.calls[0][0];
+
+  it('copies outcome and the facts onto the decision event', async () => {
+    const deps = await run(makeAutomation({
+      reasons,
+      reduce: vi.fn().mockReturnValue({ decision: 'no_action', reason: 'lux_high', facts: { lux: 85, threshold: 40 }, actions: [] }),
+    }));
+    expect(published(deps)).toMatchObject({ event_type: 'decision', reason: 'lux_high', outcome: 'declined', facts: { lux: 85, threshold: 40 } });
+  });
+
+  it('carries outcome but no facts field for a reason with none declared', async () => {
+    const deps = await run(makeAutomation({
+      reasons, reduce: vi.fn().mockReturnValue({ decision: 'turn_on', reason: 'lights_on', actions: [] }),
+    }));
+    expect(published(deps)).toMatchObject({ outcome: 'acted' });
+    expect(published(deps)).not.toHaveProperty('facts');
+  });
+
+  it('keeps conditions separate from facts', async () => {
+    const deps = await run(makeAutomation({
+      reasons,
+      reduce: vi.fn().mockReturnValue({ decision: 'no_action', reason: 'lux_high', facts: { lux: 1, threshold: 2 }, conditions: { everything: true }, actions: [] }),
+    }));
+    expect(published(deps).conditions).toEqual({ everything: true });
+  });
+
+  it.each([
+    ['an undeclared reason', { decision: 'x', reason: 'lights_off', actions: [] }],
+    ['no reason at all', { decision: 'x', actions: [] }],
+    ['an undeclared fact', { decision: 'x', reason: 'lux_high', facts: { lux: 1, threshold: 2, extra: 3 }, actions: [] }],
+    ['a non-primitive fact', { decision: 'x', reason: 'lux_high', facts: { lux: [1], threshold: 2 }, actions: [] }],
+    ['a non-finite fact', { decision: 'x', reason: 'lux_high', facts: { lux: NaN, threshold: 2 }, actions: [] }],
+  ])('aborts with unhandled_error on %s, and runs no actions', async (_name, result) => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const deps = await run(makeAutomation({ reasons, reduce: vi.fn().mockReturnValue({ ...result, actions: [{ type: 'timer.cancel', timerKey: 'k' }] }) }));
+    expect(published(deps)).toMatchObject({ event_type: 'abort', abort_kind: 'unhandled_error' });
+    expect(deps.actionRuntime.execute).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('parlour:lighting'), expect.any(String));
+    error.mockRestore();
+  });
+});
+
+// ---------- Undeclared automations are unchanged ----------
+
+describe('runPipeline — an automation without reasons', () => {
+  it('publishes a byte-identical decision payload', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-02T10:00:00.000Z'));
+    try {
+      const deps = makeDeps();
+      const auto = makeAutomation({
+        reduce: vi.fn().mockReturnValue({ decision: 'turn_on', reason: 'dark', conditions: { lux: 3 }, actions: [{ type: 'timer.cancel', timerKey: 'k' }] }),
+      });
+      await runPipeline(auto, { type: 'on_start', correlation_id: 'cid' }, makeHAClient() as never, deps as never);
+      // Written out in full on purpose: any new key, or a reordered one, shows up here.
+      expect(JSON.stringify(deps.eventPublisher.publishDecision.mock.calls[0][0])).toBe(
+        '{"schema":"home.events.v2","correlation_id":"cid","root_correlation_id":"cid",'
+        + '"automation_id":"parlour:lighting","location":"parlour","subsystem":"lighting",'
+        + '"timestamp":"2026-11-02T10:00:00.000Z","event_type":"decision","trigger":{"type":"on_start"},'
+        + '"decision":"turn_on","reason":"dark","conditions":{"lux":3},'
+        + '"actions":[{"type":"timer.cancel","timerKey":"k"}],"hasAction":true}',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('never gains outcome or facts, even if the reducer returns a stray facts field', async () => {
+    const deps = makeDeps();
+    const auto = makeAutomation({ reduce: vi.fn().mockReturnValue({ decision: 'x', facts: { a: 1 }, actions: [] }) });
+    await runPipeline(auto, onStartEvent, makeHAClient() as never, deps as never);
+    const event = deps.eventPublisher.publishDecision.mock.calls[0][0];
+    expect(event).not.toHaveProperty('outcome');
+    expect(event).not.toHaveProperty('facts');
+  });
+});

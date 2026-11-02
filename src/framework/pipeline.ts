@@ -2,6 +2,8 @@ import type { Automation } from '../types/automation.js';
 import type { TriggerEvent } from '../types/triggers.js';
 import { summarizeTrigger } from '../types/triggers.js';
 import { isAbort, UnavailableInputError } from '../types/automation.js';
+import { resolveDeclaredReason } from '../types/reasons.js';
+import type { ResolvedReason } from '../types/reasons.js';
 import type { HAClient } from './ha-client.js';
 import type { EventPublisher, ObsEvent } from './event-publisher.js';
 import type { ActionRuntime } from './action-runtime.js';
@@ -76,6 +78,22 @@ export async function runPipeline(
     return;
   }
 
+  // Step 3b: Declared reasons. Only automations that opted in are checked; for the rest
+  // `declared` stays undefined and the event below is built exactly as before.
+  let declared: ResolvedReason | undefined;
+  if (automation.reasons) {
+    try {
+      declared = resolveDeclaredReason(automation.reasons, result);
+    } catch (err) {
+      // An undeclared reason or fact is an authoring bug. Abort loudly rather than publish a
+      // decision a consumer cannot explain; the message goes to the log because the abort
+      // event itself carries no free text.
+      console.error(`[pipeline] ${automation.id}: declared-reasons violation:`, (err as Error).message);
+      deps.eventPublisher.publishDecision({ ...base, event_type: 'abort', abort_kind: 'unhandled_error', trigger });
+      return;
+    }
+  }
+
   // Step 4: Validate — safe defaults
   const actions = result.actions ?? [];
   // Defaults to the full context object so authors get observability "for free" without
@@ -91,6 +109,8 @@ export async function runPipeline(
     conditions,
     actions,
     hasAction: actions.length > 0,
+    ...(declared && { outcome: declared.outcome }),
+    ...(declared?.facts && { facts: declared.facts }),
   };
 
   // Step 5: Fanout

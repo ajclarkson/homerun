@@ -75,6 +75,24 @@ describe('parseConfig — valid configuration', () => {
 
 // ---------- !secret resolution ----------
 
+describe('parseConfig — history', () => {
+  it('is off when the history block is absent', () => {
+    expect(parseConfig(MINIMAL).history).toBeUndefined();
+  });
+
+  it('defaults to 20 per location and 30 house-wide when the block is present', () => {
+    expect(parseConfig(`${MINIMAL}history: {}\n`).history).toEqual({ size: 20, houseSize: 30 });
+  });
+
+  it('accepts explicit sizes', () => {
+    expect(parseConfig(`${MINIMAL}history:\n  size: 5\n  houseSize: 50\n`).history).toEqual({ size: 5, houseSize: 50 });
+  });
+
+  it.each(['size: 0', 'size: 201', 'size: 2.5', 'houseSize: 0', 'houseSize: 500'])('rejects %s', (line) => {
+    expect(() => parseConfig(`${MINIMAL}history:\n  ${line}\n`)).toThrow(/history/);
+  });
+});
+
 describe('parseConfig — !secret resolution', () => {
   it('resolves !secret references from secrets content', () => {
     const configContent = `

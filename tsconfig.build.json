@@ -1,0 +1,5 @@
+{
+  // Type tests (*.test-d.ts) are checked by `tsc --noEmit` and vitest but must not ship in dist.
+  "extends": "./tsconfig.json",
+  "exclude": ["src/**/*.test.ts", "src/**/*.test-d.ts", "scripts/**/*.test.ts"]
+}
