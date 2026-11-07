@@ -1,5 +1,6 @@
 import type { MqttClient } from 'mqtt';
 import type { Action, HaCallServiceAction } from '../types/actions.js';
+import { ackSatisfied } from './ha-client.js';
 import type { AckTimeoutEvent, EntityState, HAClient } from './ha-client.js';
 import type { TimerManager } from './timer-manager.js';
 import type { EventPublisher, ObsEvent } from './event-publisher.js';
@@ -38,6 +39,11 @@ function safeStringify(err: object): string {
 // as a platform-wide naming convention, not something homerun needs to hand-map per service.
 // These are the known exceptions: call parameters that don't name a resulting attribute.
 const NON_ATTRIBUTE_DATA_KEYS = new Set(['transition', 'entity_id']);
+
+// Data keys that set the entity's top-level `state` rather than an attribute of the same name.
+// A climate entity's state is its hvac_mode and it has no `hvac_mode` attribute, so tracking it
+// as an attribute could never be satisfied: every such call, changing or not, timed out.
+const DATA_KEY_TO_STATE = new Set(['hvac_mode']);
 
 // `set_value` on these domains sets the entity's top-level `state` directly — unlike most
 // services, where a `data` key names the attribute it ends up on, these have no attribute
@@ -80,16 +86,13 @@ function computeExpectedAck(
   for (const [key, value] of Object.entries(action.data ?? {})) {
     if (NON_ATTRIBUTE_DATA_KEYS.has(key)) continue;
     if ('state' in expected && key === 'value' && SET_VALUE_TO_STATE_DOMAINS.has(action.domain)) continue;
-    expected[key] = value;
+    expected[DATA_KEY_TO_STATE.has(key) ? 'state' : key] = value;
   }
 
   if (Object.keys(expected).length === 0) return undefined;
 
-  // See ha-client.ts's ackSatisfied for why `state` needs string coercion (#158) — the same
-  // number-vs-string gap applies here to the idempotency pre-check.
-  const alreadySatisfied = Object.entries(expected).every(([key, value]) =>
-    key === 'state' ? current !== undefined && String(current.state) === String(value) : current?.attributes[key] === value,
-  );
+  // Same predicate the HA client uses to consume acks, so the two cannot drift apart.
+  const alreadySatisfied = current !== undefined && ackSatisfied(expected, current);
   if (alreadySatisfied) return undefined;
 
   return expected;

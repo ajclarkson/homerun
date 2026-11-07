@@ -603,6 +603,100 @@ describe('HAClient', () => {
       }
     });
 
+    describe('already satisfied at registration', () => {
+      const origin = (entity: string, expected: Record<string, unknown>) => ({
+        correlationId: 'A',
+        rootCorrelationId: 'A',
+        automationId: 'room:thermostat',
+        location: 'room',
+        subsystem: 'heating',
+        action: { type: 'ha.call_service' as const, domain: 'climate', service: 'set_temperature', target: { entity_id: entity }, data: {} },
+        expected,
+      });
+
+      async function setup(entities: Record<string, ReturnType<typeof makeEntity>>) {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        const { client } = await connectAndInitialise(entities);
+        const timeouts: unknown[] = [];
+        client.on('action_ack_timeout', (e) => timeouts.push(e));
+        return { client, timeouts };
+      }
+
+      it('arms no timer and emits no timeout when state already matches', async () => {
+        try {
+          const { client, timeouts } = await setup({ 'climate.example': makeEntity('heat', 'T1', { temperature: 5 }) });
+          client.registerPendingAck('climate.example', origin('climate.example', { state: 'heat', temperature: 5 }), 8000);
+          expect(vi.getTimerCount()).toBe(0);
+          vi.advanceTimersByTime(8001);
+          expect(timeouts).toHaveLength(0);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('times out when the state matches but an attribute does not', async () => {
+        try {
+          const { client, timeouts } = await setup({ 'climate.example': makeEntity('heat', 'T1', { temperature: 18 }) });
+          client.registerPendingAck('climate.example', origin('climate.example', { state: 'heat', temperature: 5 }), 8000);
+          vi.advanceTimersByTime(8001);
+          expect(timeouts).toHaveLength(1);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('times out when the entity is unavailable', async () => {
+        try {
+          const { client, timeouts } = await setup({ 'climate.example': makeEntity('unavailable', 'T1') });
+          client.registerPendingAck('climate.example', origin('climate.example', { state: 'heat' }), 8000);
+          vi.advanceTimersByTime(8001);
+          expect(timeouts).toHaveLength(1);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('times out when the entity is not in the cache', async () => {
+        try {
+          const { client, timeouts } = await setup({});
+          client.registerPendingAck('climate.missing', origin('climate.missing', { state: 'heat' }), 8000);
+          vi.advanceTimersByTime(8001);
+          expect(timeouts).toHaveLength(1);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('clears an older pending timer when an already-satisfied ack supersedes it', async () => {
+        try {
+          const { client, timeouts } = await setup({ 'climate.example': makeEntity('heat', 'T1', { temperature: 5 }) });
+          client.registerPendingAck('climate.example', origin('climate.example', { temperature: 21 }), 8000);
+          client.registerPendingAck('climate.example', origin('climate.example', { temperature: 5 }), 8000);
+          expect(vi.getTimerCount()).toBe(0);
+          vi.advanceTimersByTime(8001);
+          expect(timeouts).toHaveLength(0);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('a superseded timer cannot fire or delete the newer ack', async () => {
+        try {
+          const { client, timeouts } = await setup({ 'climate.example': makeEntity('heat', 'T1', { temperature: 18 }) });
+          client.registerPendingAck('climate.example', origin('climate.example', { temperature: 20 }), 4000);
+          vi.advanceTimersByTime(2000);
+          client.registerPendingAck('climate.example', origin('climate.example', { temperature: 21 }), 4000);
+          vi.advanceTimersByTime(2500);
+          expect(timeouts).toHaveLength(0);
+          capturedSubscribeCallback!(snapshot({ 'climate.example': makeEntity('heat', 'T2', { temperature: 21 }) }));
+          vi.advanceTimersByTime(5000);
+          expect(timeouts).toHaveLength(0);
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+    });
+
     it('matches a numeric expected state against HA\'s string state representation (#158)', async () => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       try {

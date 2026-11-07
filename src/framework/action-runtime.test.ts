@@ -329,6 +329,23 @@ describe('ActionRuntime — command ack tracking', () => {
     expect(deps.haClient.registerPendingAck).not.toHaveBeenCalled();
   });
 
+  it('tracks hvac_mode as the entity state, not an attribute', async () => {
+    deps.commandAck.enabled = true;
+    const rt = new ActionRuntime(deps as never);
+    const action: Action = { type: 'ha.call_service', domain: 'climate', service: 'set_temperature', target: { entity_id: 'climate.example' }, data: { hvac_mode: 'heat', temperature: 5 } };
+    await rt.execute([action], makeCtx());
+    expect(deps.haClient.registerPendingAck).toHaveBeenCalledWith('climate.example', expect.objectContaining({ expected: { state: 'heat', temperature: 5 } }), 8000);
+  });
+
+  it('skips tracking a climate call whose hvac_mode and temperature already match', async () => {
+    deps.commandAck.enabled = true;
+    deps.haClient.state.mockReturnValue({ entity_id: 'climate.example', state: 'heat', attributes: { temperature: 5 }, last_changed: '', last_updated: '' });
+    const rt = new ActionRuntime(deps as never);
+    const action: Action = { type: 'ha.call_service', domain: 'climate', service: 'set_temperature', target: { entity_id: 'climate.example' }, data: { hvac_mode: 'heat', temperature: 5 } };
+    await rt.execute([action], makeCtx());
+    expect(deps.haClient.registerPendingAck).not.toHaveBeenCalled();
+  });
+
   it('skips tracking when the entity already matches every expected field (idempotent)', async () => {
     deps.commandAck.enabled = true;
     deps.haClient.state.mockReturnValue({ entity_id: 'light.example', state: 'on', attributes: {}, last_changed: '', last_updated: '' });
