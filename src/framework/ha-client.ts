@@ -95,7 +95,10 @@ interface PendingAck extends AckOrigin {
   timer: NodeJS.Timeout;
 }
 
-function ackSatisfied(expected: Record<string, unknown>, state: EntityState): boolean {
+// The single definition of "this entity has reached the expected state": used when consuming
+// a pending ack, when registering one (an already-satisfied call produces no state_changed),
+// and by the action runtime's idempotency pre-check.
+export function ackSatisfied(expected: Record<string, unknown>, state: EntityState): boolean {
   // HA represents every entity's state as a string, even numeric domains (number,
   // input_number, ...) — a dispatched call's data.value is typically a plain JS number, so
   // comparing `state` with strict equality never matches regardless of what HA does. See #158.
@@ -206,7 +209,21 @@ export class HAClient extends EventEmitter {
   // moment a satisfying state_changed arrives; otherwise emits action_ack_timeout on expiry
   // with the same origin, so a listener has everything needed to publish a self-sufficient
   // ObsEvent without HAClient itself knowing about observability. See #55.
+  //
+  // If the cached state already satisfies `expected` nothing is armed: HA emits no
+  // state_changed for a no-op call, so a timer could only produce a false timeout. A missing
+  // or unavailable entity never satisfies a real expectation, so it is tracked as usual.
+  // Registering supersedes any earlier ack for the entity; its timer is cleared so it can
+  // neither fire a stale timeout nor delete the newer entry.
   registerPendingAck(entityId: string, origin: AckOrigin, timeoutMs: number): void {
+    const previous = this.pendingAcks.get(entityId);
+    if (previous) {
+      clearTimeout(previous.timer);
+      this.pendingAcks.delete(entityId);
+    }
+    const current = this.stateCache.get(entityId);
+    if (current && ackSatisfied(origin.expected, current)) return;
+
     const timer = setTimeout(() => {
       this.pendingAcks.delete(entityId);
       this.emit('action_ack_timeout', { ...origin, entity_id: entityId });
