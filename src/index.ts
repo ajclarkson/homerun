@@ -62,7 +62,7 @@ const actionRuntime = new ActionRuntime({
 // 3. Initial automation load — must complete before the engine and scheduler start.
 const automationsDir = path.resolve(config.automations.dir);
 
-await rescanAutomations(automationsDir, registry);
+await rescanAutomations(automationsDir, registry, undefined, undefined, config.automations.ignore);
 const initialCount = registry.getAll().length;
 metricsBackend.setGauge('homerun_automations_loaded', initialCount);
 console.log(`[homerun] loaded ${initialCount} automation(s)`);
@@ -92,10 +92,10 @@ engine.start();
 scheduler.start();
 
 // 5. Start hot-reload watcher (dev) and SIGUSR1 rescan (git-sync sidecar in k8s).
-startHotReload(automationsDir, registry);
+startHotReload(automationsDir, registry, config.automations.ignore);
 
 async function reload(): Promise<void> {
-  await rescanAutomations(automationsDir, registry);
+  await rescanAutomations(automationsDir, registry, undefined, undefined, config.automations.ignore);
   scheduler.sync(registry.getAll());
   const count = registry.getAll().length;
   metricsBackend.setGauge('homerun_automations_loaded', count);

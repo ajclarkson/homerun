@@ -306,7 +306,7 @@ describe('rescanAutomations', () => {
     mockReaddir.mockResolvedValue(['parlour-lighting.ts', 'parlour-lighting.test.ts']);
 
     const fileToIds = new Map<string, string[]>();
-    await rescanAutomations('/automations', reg, fileToIds, makeImporter({ default: makeAutomation() }));
+    await rescanAutomations('/automations', reg, fileToIds, makeImporter({ default: makeAutomation() }), ['types', 'lib']);
 
     expect(mockBuild).toHaveBeenCalledTimes(1);
     expect(mockBuild).toHaveBeenCalledWith(expect.objectContaining({
@@ -314,12 +314,12 @@ describe('rescanAutomations', () => {
     }));
   });
 
-  it('skips files under a types/ directory', async () => {
+  it('skips files under an ignored types/ directory', async () => {
     const reg = makeRegistry();
     mockReaddir.mockResolvedValue(['parlour-lighting.ts', 'types/ha-entities.ts']);
 
     const fileToIds = new Map<string, string[]>();
-    await rescanAutomations('/automations', reg, fileToIds, makeImporter({ default: makeAutomation() }));
+    await rescanAutomations('/automations', reg, fileToIds, makeImporter({ default: makeAutomation() }), ['types', 'lib']);
 
     expect(mockBuild).toHaveBeenCalledTimes(1);
     expect(mockBuild).toHaveBeenCalledWith(expect.objectContaining({
@@ -327,17 +327,59 @@ describe('rescanAutomations', () => {
     }));
   });
 
-  it('skips files under a lib/ directory', async () => {
+  it('skips files under an ignored lib/ directory', async () => {
     const reg = makeRegistry();
     mockReaddir.mockResolvedValue(['parlour-lighting.ts', 'lib/lighting-controller-factory.ts']);
 
     const fileToIds = new Map<string, string[]>();
-    await rescanAutomations('/automations', reg, fileToIds, makeImporter({ default: makeAutomation() }));
+    await rescanAutomations('/automations', reg, fileToIds, makeImporter({ default: makeAutomation() }), ['types', 'lib']);
 
     expect(mockBuild).toHaveBeenCalledTimes(1);
     expect(mockBuild).toHaveBeenCalledWith(expect.objectContaining({
       entryPoints: ['/automations/parlour-lighting.ts'],
     }));
+  });
+
+  it('loads lib/ and types/ when ignore is not set', async () => {
+    const reg = makeRegistry();
+    mockReaddir.mockResolvedValue(['a.ts', 'lib/b.ts', 'types/c.ts']);
+
+    await rescanAutomations('/automations', reg, new Map(), makeImporter({ default: makeAutomation() }));
+
+    expect(mockBuild).toHaveBeenCalledTimes(3);
+  });
+
+  it('matches ignore names as whole path segments, at any depth', async () => {
+    const reg = makeRegistry();
+    mockReaddir.mockResolvedValue(['a.ts', 'x/shared/b.ts', 'shared-other/c.ts', 'shared.ts']);
+
+    await rescanAutomations('/automations', reg, new Map(), makeImporter({ default: makeAutomation() }), ['shared']);
+
+    const entries = mockBuild.mock.calls.map((c) => (c[0] as { entryPoints: string[] }).entryPoints[0]);
+    expect(entries).toEqual(['/automations/a.ts', '/automations/shared-other/c.ts', '/automations/shared.ts']);
+  });
+
+  it('unregisters a tracked file that becomes ignored', async () => {
+    const reg = makeRegistry();
+    const fileToIds = new Map<string, string[]>([['/automations/lib/a.ts', ['x']]]);
+    mockReaddir.mockResolvedValue(['lib/a.ts']);
+
+    await rescanAutomations('/automations', reg, fileToIds, makeImporter({ default: makeAutomation() }), ['lib']);
+
+    expect(reg.unregister).toHaveBeenCalledWith('x');
+  });
+
+  it('logs an error for a file with no default export on every rescan', async () => {
+    const reg = makeRegistry();
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockReaddir.mockResolvedValue(['nodefault.ts']);
+    const importer = makeImporter({ default: undefined });
+
+    await rescanAutomations('/automations', reg, new Map(), importer);
+    await rescanAutomations('/automations', reg, new Map(), importer);
+
+    expect(errSpy).toHaveBeenCalledTimes(2);
+    errSpy.mockRestore();
   });
 });
 
@@ -377,6 +419,17 @@ describe('startHotReload — AUTOMATION env var', () => {
     const ignored = options.ignored as Array<RegExp | unknown>;
     const testTsPattern = ignored.find((p) => p instanceof RegExp && p.test('foo.test.ts'));
     expect(testTsPattern).toBeDefined();
+  });
+
+  it('ignores configured directory names in the watcher', async () => {
+    const { startHotReload } = await import('./hot-reload.js');
+    startHotReload('/automations', makeRegistry(), ['lib']);
+    const [, options] = mockWatch.mock.calls[0] as [unknown, { ignored: unknown[] }];
+    const fn = options.ignored.find((p) => typeof p === 'function') as (p: string) => boolean;
+    expect(fn('/automations/lib/helper.ts')).toBe(true);
+    expect(fn('/automations/lib')).toBe(true);
+    expect(fn('/automations/library/a.ts')).toBe(false);
+    expect(fn('/automations/a.ts')).toBe(false);
   });
 
   it('watches only the named file when AUTOMATION is set', async () => {

@@ -12,12 +12,13 @@ Every push to `main` publishes an `edge` build to npm (version `<base>-edge.<sha
 
 ## Layout
 
-Put automations anywhere under one directory (you choose it, see Configuration). Every `.ts` file under it, recursively, is loaded, except `*.test.ts` and `*.d.ts`.
+Put automations anywhere under one directory (you choose it, see Configuration). Every `.ts` file under it, recursively, is loaded, except `*.test.ts`, `*.d.ts` and anything under a directory named in `automations.ignore`.
 
 - Each file must `export default` an `Automation`, or an array of them. Every automation needs a unique `id`.
 - Files are bundled individually with esbuild. Imports of `@ajclarkson/homerun` and `@ajclarkson/homerun/testing` resolve to the running framework; other imports (shared helpers, factories) are bundled in.
 - A failed reload keeps the previous version of that automation registered.
 - Keep tests next to the code (`*.test.ts`); the loader ignores them.
+- Shared helpers and generated types that are not automations belong in a directory listed in `automations.ignore` (for example `ignore: [lib, types]`). Names are matched as whole path segments at any depth. Nothing is skipped by default, so a helper file without a default export is logged as an error on every rescan.
 
 ## Generate types from your Home Assistant
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { runPipeline } from './pipeline.js';
 import type { Automation } from '../types/automation.js';
 import type { TriggerEvent } from '../types/triggers.js';
@@ -297,6 +297,69 @@ describe('runPipeline — exception in reduce', () => {
     const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
     expect(event.event_type).toBe('abort');
     expect(event.abort_kind).toBe('unhandled_error');
+  });
+});
+
+// ---------- Logging and structure of unhandled errors ----------
+
+describe('runPipeline — unhandled error reporting', () => {
+  class WeirdName extends Error {
+    override name = 'Not An Identifier!';
+  }
+  class SensorFault extends Error {
+    override name = 'SensorFault';
+  }
+  const throwing = (value: unknown) => vi.fn().mockImplementation(() => { throw value; });
+
+  async function run(overrides: Record<string, unknown>) {
+    const deps = makeDeps();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    await runPipeline(makeAutomation({ id: 'parlour:lighting', ...overrides }), onStartEvent, makeHAClient() as never, deps as never);
+    const [event] = deps.eventPublisher.publishDecision.mock.calls[0] as [Record<string, unknown>];
+    return { event, error };
+  }
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each([['context'], ['reduce']] as const)('reports stage and error_type for an Error thrown in %s', async (stage) => {
+    const { event } = await run({ [stage]: throwing(new SensorFault('secret detail')) });
+    expect(event).toMatchObject({ abort_kind: 'unhandled_error', stage, error_type: 'SensorFault' });
+    expect(JSON.stringify(event)).not.toContain('secret detail');
+  });
+
+  it.each([['context'], ['reduce']] as const)('logs id, stage, message and stack for %s', async (stage) => {
+    const err = new SensorFault('secret detail');
+    const { error } = await run({ [stage]: throwing(err) });
+    expect(error).toHaveBeenCalledTimes(1);
+    const text = error.mock.calls[0].map(String).join(' ');
+    expect(text).toContain('parlour:lighting');
+    expect(text).toContain(stage);
+    expect(text).toContain('secret detail');
+    expect(text).toContain(String(err.stack));
+  });
+
+  it.each([['context'], ['reduce']] as const)('omits error_type for a non-identifier name in %s', async (stage) => {
+    const { event } = await run({ [stage]: throwing(new WeirdName('x')) });
+    expect(event).toMatchObject({ abort_kind: 'unhandled_error', stage });
+    expect(event).not.toHaveProperty('error_type');
+  });
+
+  it.each([['string', 'oops'], ['null', null], ['plain object', { name: 'Looks_Fine' }]])(
+    'omits error_type and still logs for a non-Error throw (%s)',
+    async (_n, value) => {
+      const { event, error } = await run({ context: throwing(value) });
+      expect(event).toMatchObject({ abort_kind: 'unhandled_error', stage: 'context' });
+      expect(event).not.toHaveProperty('error_type');
+      expect(error).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('does not log or add fields on the UnavailableInputError path', async () => {
+    const { event, error } = await run({ context: throwing(new UnavailableInputError('sensor.example')) });
+    expect(event).toMatchObject({ abort_kind: 'unavailable_input', entity: 'sensor.example' });
+    expect(event).not.toHaveProperty('stage');
+    expect(event).not.toHaveProperty('error_type');
+    expect(error).not.toHaveBeenCalled();
   });
 });
 

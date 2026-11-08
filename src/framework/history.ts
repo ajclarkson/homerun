@@ -87,7 +87,12 @@ export function classify(event: ObsEvent): HistoryEntry | undefined {
         kind: 'abort',
         ...(event.reason !== undefined && { reason: event.reason }),
         trigger: event.trigger,
-        detail: { abort_kind: event.abort_kind, ...(event.entity !== undefined && { entity: event.entity }) },
+        detail: {
+          abort_kind: event.abort_kind,
+          ...(event.entity !== undefined && { entity: event.entity }),
+          ...(event.stage !== undefined && { stage: event.stage }),
+          ...(event.error_type !== undefined && { error_type: event.error_type }),
+        },
       };
     case 'action_result':
       return event.status === 'error' ? failureEntry(event, 'error', event.action) : undefined;

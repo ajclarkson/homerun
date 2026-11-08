@@ -73,21 +73,26 @@ export function _deleteFile(
   fileToIds.delete(filePath);
 }
 
-const EXCLUDED_DIRS = new Set(['types', 'lib']);
+// Whole-segment match so `lib` skips `lib/x.ts` but not `library/x.ts`. Which folders hold
+// helpers rather than automations is the consumer's layout, so it comes from config.
+const hasIgnoredSegment = (relPath: string, ignore: ReadonlySet<string>): boolean =>
+  relPath.split(path.sep).some((seg) => ignore.has(seg));
 
-const isAutomationFile = (f: string): boolean =>
+const isAutomationFile = (f: string, ignore: ReadonlySet<string>): boolean =>
   f.endsWith('.ts') &&
   !f.endsWith('.test.ts') &&
   !f.includes('node_modules') &&
   !f.includes('.d.ts') &&
-  !f.split(path.sep).some(seg => EXCLUDED_DIRS.has(seg));
+  !hasIgnoredSegment(f, ignore);
 
 export async function rescanAutomations(
   automationsDir: string,
   registry: AutomationRegistry,
   fileToIds: Map<string, string[]> = moduleFileToIds,
   importer: Importer = defaultImporter,
+  ignore: readonly string[] = [],
 ): Promise<void> {
+  const ignoreSet = new Set(ignore);
   let files: string[] = [];
   try {
     const { readdir } = await import('node:fs/promises');
@@ -97,7 +102,7 @@ export async function rescanAutomations(
   }
 
   const currentPaths = new Set(
-    files.filter(isAutomationFile).map((f) => path.join(automationsDir, f)),
+    files.filter((f) => isAutomationFile(f, ignoreSet)).map((f) => path.join(automationsDir, f)),
   );
 
   for (const trackedPath of [...fileToIds.keys()]) {
@@ -111,12 +116,24 @@ export async function rescanAutomations(
   }
 }
 
-export function startHotReload(automationsDir: string, registry: AutomationRegistry): void {
+export function startHotReload(
+  automationsDir: string,
+  registry: AutomationRegistry,
+  ignore: readonly string[] = [],
+): void {
+  const ignoreSet = new Set(ignore);
   const target = process.env.AUTOMATION
     ? path.join(automationsDir, `${process.env.AUTOMATION}.ts`)
     : `${automationsDir}/**/*.ts`;
 
-  const watcher = watch(target, { ignoreInitial: true, ignored: [/node_modules/, /\.test\.ts$/] });
+  const watcher = watch(target, {
+    ignoreInitial: true,
+    ignored: [
+      /node_modules/,
+      /\.test\.ts$/,
+      (p: string) => hasIgnoredSegment(path.relative(automationsDir, p), ignoreSet),
+    ],
+  });
 
   const reload = (filePath: string): void => {
     _reloadFile(filePath, registry).catch((err: unknown) => {
