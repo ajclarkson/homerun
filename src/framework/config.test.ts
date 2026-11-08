@@ -201,8 +201,13 @@ mqtt:
 describe('parseConfig — automations.ignore', () => {
   const withIgnore = (ignore: string): string => MINIMAL.replace('automations:\n  dir: ./automations', `automations:\n  dir: ./automations\n  ignore: ${ignore}`);
 
-  it('defaults to an empty list', () => {
-    expect(parseConfig(MINIMAL).automations.ignore).toEqual([]);
+  it('defaults to lib and types', () => {
+    expect(parseConfig(MINIMAL).automations.ignore).toEqual(['lib', 'types']);
+  });
+
+  it('replaces the default when set, and an empty list disables it', () => {
+    expect(parseConfig(withIgnore('[shared]')).automations.ignore).toEqual(['shared']);
+    expect(parseConfig(withIgnore('[]')).automations.ignore).toEqual([]);
   });
 
   it('accepts directory names', () => {

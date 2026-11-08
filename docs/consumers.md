@@ -18,7 +18,7 @@ Put automations anywhere under one directory (you choose it, see Configuration).
 - Files are bundled individually with esbuild. Imports of `@ajclarkson/homerun` and `@ajclarkson/homerun/testing` resolve to the running framework; other imports (shared helpers, factories) are bundled in.
 - A failed reload keeps the previous version of that automation registered.
 - Keep tests next to the code (`*.test.ts`); the loader ignores them.
-- Shared helpers and generated types that are not automations belong in a directory listed in `automations.ignore` (for example `ignore: [lib, types]`). Names are matched as whole path segments at any depth. Nothing is skipped by default, so a helper file without a default export is logged as an error on every rescan.
+- Shared helpers and generated types that are not automations belong in a directory listed in `automations.ignore` (by default `lib` and `types`). Names are matched as whole path segments at any depth. The default is `[lib, types]`; setting the key replaces it, and `ignore: []` disables ignoring, in which case a helper file without a default export is logged as an error on every rescan.
 
 ## Generate types from your Home Assistant
 

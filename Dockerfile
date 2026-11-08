@@ -17,6 +17,8 @@ COPY --from=build /app/dist ./dist
 COPY package.json ./
 
 ENV NODE_ENV=production
-ENV AUTOMATIONS_DIR=/automations
+
+# The runtime only reads /app and the mounted config and automations; it writes nothing to disk.
+USER node
 
 CMD ["node", "dist/src/index.js"]

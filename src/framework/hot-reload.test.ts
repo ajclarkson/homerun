@@ -340,7 +340,7 @@ describe('rescanAutomations', () => {
     }));
   });
 
-  it('loads lib/ and types/ when ignore is not set', async () => {
+  it('loads lib/ and types/ when the ignore list is empty', async () => {
     const reg = makeRegistry();
     mockReaddir.mockResolvedValue(['a.ts', 'lib/b.ts', 'types/c.ts']);
 

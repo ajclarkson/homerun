@@ -3,12 +3,8 @@
 ## Unreleased
 
 - An exception in an automation's `context()` or `reduce()` is now logged (`console.error`, with automation id, stage, message and stack). The `unhandled_error` abort gains optional structured `stage` (`context` | `reduce`) and `error_type` (the `Error` name, only when identifier-shaped). Neither the message nor the stack is on the event. History `detail` carries both fields too; the history schema is unchanged.
-
-## Unreleased
-
-- **Behaviour change:** the loader no longer skips `lib/` and `types/` directories automatically. Consumers that relied on that must set `automations.ignore: [lib, types]` in `configuration.yaml`, otherwise helper files there are loaded as automations and logged as errors (no default export).
-- New `automations.ignore`: list of directory names, matched as path segments, skipped by the loader and the file watcher. Default `[]`.
-- Docker image runs as the non-root `node` user; the unused `AUTOMATIONS_DIR` env var is removed (the path comes from `automations.dir`).
+- New `automations.ignore`: list of directory names, matched as path segments at any depth, skipped by the loader and the file watcher. Default `[lib, types]`, the previous behaviour, so nothing changes on upgrade. Setting the key replaces the default; `[]` loads everything.
+- **Behaviour change:** the Docker image runs as the non-root `node` user (uid 1000). The mounted config and automations must be readable by that user. The runtime writes nothing to disk. The unused `AUTOMATIONS_DIR` env var is removed (the path comes from `automations.dir`).
 
 ## 0.1.0
 

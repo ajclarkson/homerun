@@ -7,7 +7,7 @@ configuration.yaml
 *.js.map
 .tmuxinator.yml
 
-# Local dev automations sandbox — point AUTOMATIONS_DIR=./automations to use
+# Local dev automations sandbox — set automations.dir to ./automations to use
 automations/*
 !automations/.gitkeep
 

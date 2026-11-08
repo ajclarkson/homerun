@@ -31,10 +31,11 @@ const ConfigSchema = z.object({
   }),
   automations: z.object({
     dir: z.string().min(1, 'automations.dir is required'),
+    // Default keeps helpers and generated types out of the loader. Setting the key replaces it; [] loads everything.
     // Bare directory names, not paths or globs: they are matched against path segments.
     ignore: z.array(
       z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/, 'automations.ignore entries must be plain directory names'),
-    ).default([]),
+    ).default(['lib', 'types']),
   }),
   server: z.object({
     port: z.coerce.number().int().min(1).max(65535).default(7070),
