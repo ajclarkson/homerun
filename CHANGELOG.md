@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 - An exception in an automation's `context()` or `reduce()` is now logged (`console.error`, with automation id, stage, message and stack). The `unhandled_error` abort gains optional structured `stage` (`context` | `reduce`) and `error_type` (the `Error` name, only when identifier-shaped). Neither the message nor the stack is on the event. History `detail` carries both fields too; the history schema is unchanged.
 - New `automations.ignore`: list of directory names, matched as path segments at any depth, skipped by the loader and the file watcher. Default `[lib, types]`, the previous behaviour, so nothing changes on upgrade. Setting the key replaces the default; `[]` loads everything.
