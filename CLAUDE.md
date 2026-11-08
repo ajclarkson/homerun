@@ -17,7 +17,7 @@ If you find yourself wanting to reference specific entities or rooms while worki
 
 ## Architecture
 
-The framework has seven core components:
+The core components:
 
 | Module | File | Responsibility |
 |--------|------|----------------|
@@ -27,8 +27,12 @@ The framework has seven core components:
 | Timer Manager | `src/framework/timer-manager.ts` | Named timers — event source that feeds `dispatch()` on expiry |
 | Pipeline Runner | `src/framework/pipeline.ts` | 5-step pipeline: correlate → context → reduce → validate → fanout |
 | Action Runtime | `src/framework/action-runtime.ts` | Declarative action execution with observability events |
-| Observability | `src/framework/observability.ts` | MQTT event + snapshot publisher |
-| Registry | `src/framework/registry.ts` | Automation registration, hot reload |
+| Event Publisher | `src/framework/event-publisher.ts` | MQTT event + snapshot publisher |
+| Registry | `src/framework/registry.ts` | Automation registration and validation |
+| Hot Reload | `src/framework/hot-reload.ts` | Loads automation files, rescans, watches for changes |
+| Config | `src/framework/config.ts` | `configuration.yaml` schema and `!secret` resolution |
+| API Server | `src/framework/api-server.ts` | HTTP API: health, automations, reload, `/events` stream |
+| Catalog / History | `src/framework/catalog.ts`, `src/framework/history.ts` | Retained reason catalogue and decision history on MQTT |
 
 **Event source pattern:** Scheduler and TimerManager are independent event sources — they have no dependency on HAClient and generate events from time/timers. Both call `TriggerEngine.dispatch()`. TriggerEngine is a pure router with zero self-generated events.
 

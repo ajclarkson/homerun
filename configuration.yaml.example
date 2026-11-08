@@ -7,6 +7,9 @@ mqtt:
 
 automations:
   dir: ./automations
+  # Directory names skipped by the loader and watcher, matched as path segments at any depth.
+  # Default shown; setting it replaces the default, and [] loads everything.
+  # ignore: [lib, types]
 
 # Optional — defaults shown
 server:
