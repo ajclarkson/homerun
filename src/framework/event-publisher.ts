@@ -55,6 +55,10 @@ export type ObsEvent = ObsEventBase & (
       reason?: string;
       // Set only when abort_kind is 'unavailable_input' — the entity that was missing/invalid.
       entity?: string;
+      // Set only on 'unhandled_error'. `error_type` is the thrown Error's name, included only
+      // when identifier-shaped (no free text); the message and stack go to the log.
+      stage?: 'context' | 'reduce';
+      error_type?: string;
     }
   | {
       // A declaring automation returned something its declaration does not allow. The decision

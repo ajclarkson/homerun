@@ -59,7 +59,7 @@ export async function runPipeline(
     if (err instanceof UnavailableInputError) {
       deps.eventPublisher.publishDecision({ ...base, event_type: 'abort', abort_kind: 'unavailable_input', entity: err.entityId, trigger });
     } else {
-      deps.eventPublisher.publishDecision({ ...base, event_type: 'abort', abort_kind: 'unhandled_error', trigger });
+      reportUnhandledError(deps.eventPublisher, base, trigger, 'context', err);
     }
     return;
   }
@@ -73,8 +73,8 @@ export async function runPipeline(
   let result: ReturnType<Automation<unknown>['reduce']>;
   try {
     result = automation.reduce(ctx);
-  } catch {
-    deps.eventPublisher.publishDecision({ ...base, event_type: 'abort', abort_kind: 'unhandled_error', trigger });
+  } catch (err) {
+    reportUnhandledError(deps.eventPublisher, base, trigger, 'reduce', err);
     return;
   }
 
@@ -127,6 +127,29 @@ export async function runPipeline(
 
 const IDENTIFIER_SHAPED = /^[A-Za-z][A-Za-z0-9_]*$/;
 
+const isIdentifierShaped = (v: unknown): v is string => typeof v === 'string' && IDENTIFIER_SHAPED.test(v);
+
+// A bug in an automation must not vanish: the full error goes to the log, and the event
+// carries only structure (stage, identifier-shaped error name) since events hold no free text.
+function reportUnhandledError(
+  publisher: EventPublisher,
+  base: Omit<Extract<ObsEvent, { event_type: 'abort' }>, 'event_type' | 'abort_kind' | 'trigger'>,
+  trigger: Extract<ObsEvent, { event_type: 'abort' }>['trigger'],
+  stage: 'context' | 'reduce',
+  err: unknown,
+): void {
+  console.error(`[pipeline] ${base.automation_id} unhandled error in ${stage}:`, err instanceof Error ? (err.stack ?? err.message) : err);
+  const errorType = err instanceof Error ? err.name : undefined;
+  publisher.publishDecision({
+    ...base,
+    event_type: 'abort',
+    abort_kind: 'unhandled_error',
+    stage,
+    ...(isIdentifierShaped(errorType) && { error_type: errorType }),
+    trigger,
+  });
+}
+
 // Structured only: `reason` and `fact` are author-supplied, so they are echoed only when
 // identifier-shaped. The complete message goes to the log.
 function reportDeclarationError(
@@ -137,12 +160,11 @@ function reportDeclarationError(
 ): void {
   console.error(`[pipeline] ${automationId}:`, (err as Error).message);
   if (!(err instanceof DeclarationError)) return;
-  const shaped = (v: unknown): v is string => typeof v === 'string' && IDENTIFIER_SHAPED.test(v);
   publisher.publishActionEvent({
     ...base,
     event_type: 'declaration_error',
     problem: err.problem,
-    ...(shaped(err.reason) && { reason: err.reason }),
-    ...(shaped(err.fact) && { fact: err.fact }),
+    ...(isIdentifierShaped(err.reason) && { reason: err.reason }),
+    ...(isIdentifierShaped(err.fact) && { fact: err.fact }),
   });
 }

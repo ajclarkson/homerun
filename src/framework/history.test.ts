@@ -62,6 +62,12 @@ describe('classify — aborts', () => {
     expect(classify(abortEvent({ abort_kind: 'unhandled_error' }))?.detail).toEqual({ abort_kind: 'unhandled_error' });
   });
 
+  it('stores the stage and error_type of an unhandled_error', () => {
+    expect(classify(abortEvent({ abort_kind: 'unhandled_error', stage: 'reduce', error_type: 'TypeError' }))?.detail).toEqual({
+      abort_kind: 'unhandled_error', stage: 'reduce', error_type: 'TypeError',
+    });
+  });
+
   it('drops a disabled abort', () => {
     expect(classify(abortEvent({ abort_kind: 'disabled' }))).toBeUndefined();
   });

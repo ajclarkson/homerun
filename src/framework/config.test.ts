@@ -197,3 +197,19 @@ mqtt:
     expect(() => parseConfig(content)).toThrow('Invalid configuration');
   });
 });
+
+describe('parseConfig — automations.ignore', () => {
+  const withIgnore = (ignore: string): string => MINIMAL.replace('automations:\n  dir: ./automations', `automations:\n  dir: ./automations\n  ignore: ${ignore}`);
+
+  it('defaults to an empty list', () => {
+    expect(parseConfig(MINIMAL).automations.ignore).toEqual([]);
+  });
+
+  it('accepts directory names', () => {
+    expect(parseConfig(withIgnore('[lib, types, shared-code]')).automations.ignore).toEqual(['lib', 'types', 'shared-code']);
+  });
+
+  it.each(['[""]', '["a/b"]', '[".."]', '["*"]', '["a b"]'])('rejects %s', (v) => {
+    expect(() => parseConfig(withIgnore(v))).toThrow();
+  });
+});
