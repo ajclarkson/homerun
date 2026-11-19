@@ -314,6 +314,16 @@ describe('rescanAutomations', () => {
     }));
   });
 
+  it('skips tool config files but loads names that merely contain config', async () => {
+    const reg = makeRegistry();
+    mockReaddir.mockResolvedValue(['vitest.config.ts', 'sub/eslint.config.ts', 'config-sync.ts', 'room-config.ts']);
+
+    await rescanAutomations('/automations', reg, new Map(), makeImporter({ default: makeAutomation() }));
+
+    const entries = mockBuild.mock.calls.map((c) => (c[0] as { entryPoints: string[] }).entryPoints[0]).sort();
+    expect(entries).toEqual(['/automations/config-sync.ts', '/automations/room-config.ts']);
+  });
+
   it('skips files under an ignored types/ directory', async () => {
     const reg = makeRegistry();
     mockReaddir.mockResolvedValue(['parlour-lighting.ts', 'types/ha-entities.ts']);
@@ -419,6 +429,16 @@ describe('startHotReload — AUTOMATION env var', () => {
     const ignored = options.ignored as Array<RegExp | unknown>;
     const testTsPattern = ignored.find((p) => p instanceof RegExp && p.test('foo.test.ts'));
     expect(testTsPattern).toBeDefined();
+  });
+
+  it('ignores tool config files but not config-named automations in the watcher', async () => {
+    const { startHotReload } = await import('./hot-reload.js');
+    startHotReload('/automations', makeRegistry());
+    const [, options] = mockWatch.mock.calls[0] as [unknown, { ignored: unknown[] }];
+    const patterns = options.ignored.filter((p) => p instanceof RegExp) as RegExp[];
+    expect(patterns.some((p) => p.test('/automations/vitest.config.ts'))).toBe(true);
+    expect(patterns.some((p) => p.test('/automations/room-config.ts'))).toBe(false);
+    expect(patterns.some((p) => p.test('/automations/config-sync.ts'))).toBe(false);
   });
 
   it('ignores configured directory names in the watcher', async () => {
