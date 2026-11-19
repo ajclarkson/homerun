@@ -15,12 +15,21 @@ import { PromMetricsBackend } from './framework/metrics-prom.js';
 import { NoopMetricsBackend } from './framework/metrics.js';
 import { CatalogPublisher } from './framework/catalog.js';
 
-process.on('uncaughtException', (err) => {
-  console.error('[homerun] uncaughtException:', err);
-});
-process.on('unhandledRejection', (reason) => {
-  console.error('[homerun] unhandledRejection:', reason);
-});
+// Startup must fail loudly: a half-started process passes /health/live but never becomes
+// ready, so the orchestrator would never restart it. Once running, a stray error in one
+// automation must not take down the rest, so after startup we log and carry on.
+let started = false;
+
+function onFatalOrLog(kind: string, err: unknown): void {
+  console.error(`[homerun] ${kind}:`, err);
+  if (!started) {
+    console.error('[homerun] startup failed — exiting');
+    process.exit(1);
+  }
+}
+
+process.on('uncaughtException', (err) => { onFatalOrLog('uncaughtException', err); });
+process.on('unhandledRejection', (reason) => { onFatalOrLog('unhandledRejection', reason); });
 
 // 0. Load and validate configuration before anything else.
 const config = await loadConfig();
@@ -133,6 +142,7 @@ haClient.on('reconnected', () => {
 await haClient.connect(config.homeassistant.url, config.homeassistant.token);
 await haClient.ready;
 haReady = true;
+started = true;
 const { labels, areas } = haClient.registryStats;
 console.log(`[homerun] ready — ${haClient.entityCount} entities cached (${labels} labels, ${areas} areas)`);
 eventPublisher.publishLifecycle('server_started', registry.getAll().length);

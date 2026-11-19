@@ -10,6 +10,7 @@ import {
 } from 'home-assistant-js-websocket';
 import { EventEmitter } from 'node:events';
 import type { Action } from '../types/actions.js';
+import { connectWithRetry } from './connect-retry.js';
 
 // ---------- Public types ----------
 
@@ -244,7 +245,8 @@ export class HAClient extends EventEmitter {
 
   async connect(url: string, token: string): Promise<void> {
     const auth = createLongLivedTokenAuth(url, token);
-    this.connection = await createConnection({ auth });
+    // setupRetry 0: one attempt per call; connectWithRetry owns retries so each failure is logged.
+    this.connection = await connectWithRetry(() => createConnection({ auth, setupRetry: 0 }));
 
     // Reload registry and repopulate cache silently on reconnect.
     this.connection.addEventListener('disconnected', () => {
