@@ -78,9 +78,14 @@ export function _deleteFile(
 const hasIgnoredSegment = (relPath: string, ignore: ReadonlySet<string>): boolean =>
   relPath.split(path.sep).some((seg) => ignore.has(seg));
 
+// Test files and tool config (vitest.config.ts, eslint.config.ts) sit beside automations but
+// import dev-only packages the runtime cannot resolve. Shared by the rescan and the watcher
+// so both agree. Anchored on `.config.ts` so `room-config.ts` is still an automation.
+const NON_AUTOMATION_FILE = /\.(test|config)\.ts$/;
+
 const isAutomationFile = (f: string, ignore: ReadonlySet<string>): boolean =>
   f.endsWith('.ts') &&
-  !f.endsWith('.test.ts') &&
+  !NON_AUTOMATION_FILE.test(f) &&
   !f.includes('node_modules') &&
   !f.includes('.d.ts') &&
   !hasIgnoredSegment(f, ignore);
@@ -130,7 +135,7 @@ export function startHotReload(
     ignoreInitial: true,
     ignored: [
       /node_modules/,
-      /\.test\.ts$/,
+      NON_AUTOMATION_FILE,
       (p: string) => hasIgnoredSegment(path.relative(automationsDir, p), ignoreSet),
     ],
   });

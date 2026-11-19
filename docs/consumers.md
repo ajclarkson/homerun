@@ -12,7 +12,7 @@ Every push to `main` publishes an `edge` build to npm (version `<base>-edge.<sha
 
 ## Layout
 
-Put automations anywhere under one directory (you choose it, see Configuration). Every `.ts` file under it, recursively, is loaded, except `*.test.ts`, `*.d.ts` and anything under a directory named in `automations.ignore`.
+Put automations anywhere under one directory (you choose it, see Configuration). Every `.ts` file under it, recursively, is loaded, except `*.test.ts`, `*.config.ts` (tool config such as `vitest.config.ts`), `*.d.ts` and anything under a directory named in `automations.ignore`.
 
 - Each file must `export default` an `Automation`, or an array of them. Every automation needs a unique `id`.
 - Files are bundled individually with esbuild. Imports of `@ajclarkson/homerun` and `@ajclarkson/homerun/testing` resolve to the running framework; other imports (shared helpers, factories) are bundled in.
