@@ -60,7 +60,7 @@ npm run generate:ha-services   # generate typed service helpers
 
 These are non-negotiable — the framework runs unattended and controls physical devices:
 
-- **Never crash the process.** `uncaughtException` and `unhandledRejection` must be caught at the top level, logged, and recovered from.
+- **Never crash a running process.** After startup, `uncaughtException` and `unhandledRejection` are caught at the top level, logged, and recovered from. **Fail startup loudly:** an error before the process is ready (config, API server, HA connect) exits non-zero so the orchestrator restarts it. The initial HA connect retries with capped exponential backoff (`src/framework/connect-retry.ts`); invalid auth is never retried.
 - **Isolate pipeline errors.** An exception in any automation's context builder or reducer must produce an `abort` decision with `reason: 'unhandled_error'` and flow through observability. It must never affect other automations or future events.
 - **Gate on state cache readiness.** The Trigger Engine must not dispatch events until the initial state cache sync is complete after (re)connect.
 - **Hot reload must not unload on error.** A failed module load during hot reload keeps the previous version of that automation registered. A bad file push must never silently remove a running automation.

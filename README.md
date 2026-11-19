@@ -226,7 +226,7 @@ The server exposes an HTTP API on port `7070` by default (`server.port` in the c
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/health/live` | Always returns `200 { status: "live" }` — used for liveness probes. |
-| `GET` | `/health/ready` | Returns `200` when the HA state cache is populated and automations are loaded, `503` while starting. Response includes `entities`, `automations` counts, and `dry_run: true` if running in dry-run mode. |
+| `GET` | `/health/ready` | Returns `200` when the HA state cache is populated and automations are loaded, `503` while starting. If Home Assistant is unreachable at startup, the connect is retried (capped exponential backoff, 20 attempts, roughly 8 minutes); after that, or on invalid auth, the process exits non-zero. Response includes `entities`, `automations` counts, and `dry_run: true` if running in dry-run mode. |
 | `GET` | `/automations` | Lists all registered automations with their `id`, `location`, `subsystem`, and trigger types, plus `reasons` for those that declare them. |
 | `POST` | `/automations/:id/trigger` | Manually fires an `on_start` event for the given automation. |
 | `POST` | `/reload` | Rescans the automations directory and hot-reloads changed files. |
