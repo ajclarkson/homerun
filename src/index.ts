@@ -14,6 +14,10 @@ import { ApiServer } from './framework/api-server.js';
 import { PromMetricsBackend } from './framework/metrics-prom.js';
 import { NoopMetricsBackend } from './framework/metrics.js';
 import { CatalogPublisher } from './framework/catalog.js';
+import { disableBufferPool } from './framework/buffer-pool.js';
+
+// Before any MQTT client exists, so no pooled buffer is ever cached by mqtt-packet.
+disableBufferPool();
 
 // Startup must fail loudly: a half-started process passes /health/live but never becomes
 // ready, so the orchestrator would never restart it. Once running, a stray error in one

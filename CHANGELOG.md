@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The runtime (`homerun` bin) sets `Buffer.poolSize = 0` at startup to work around an unbounded memory growth in mqtt-packet ([mqttjs/mqtt-packet#163](https://github.com/mqttjs/mqtt-packet/issues/163)): its never-evicted length cache pins a whole Buffer pool block per entry. Small allocations are no longer pooled, which is negligible at MQTT message rates. Library imports are unaffected.
+
 ## 0.2.0
 
 - An exception in an automation's `context()` or `reduce()` is now logged (`console.error`, with automation id, stage, message and stack). The `unhandled_error` abort gains optional structured `stage` (`context` | `reduce`) and `error_type` (the `Error` name, only when identifier-shaped). Neither the message nor the stack is on the event. History `detail` carries both fields too; the history schema is unchanged.
