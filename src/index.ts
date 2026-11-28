@@ -14,6 +14,7 @@ import { ApiServer } from './framework/api-server.js';
 import { PromMetricsBackend } from './framework/metrics-prom.js';
 import { NoopMetricsBackend } from './framework/metrics.js';
 import { CatalogPublisher } from './framework/catalog.js';
+import { waitForHaReady } from './framework/startup-ready.js';
 
 // Startup must fail loudly: a half-started process passes /health/live but never becomes
 // ready, so the orchestrator would never restart it. Once running, a stray error in one
@@ -139,8 +140,15 @@ haClient.on('reconnected', () => {
   eventPublisher.publishLifecycle('ha_reconnected', registry.getAll().length);
 });
 
-await haClient.connect(config.homeassistant.url, config.homeassistant.token);
-await haClient.ready;
+// Exits non-zero on connect failure or if the first snapshot never arrives, rather than
+// leaving a process that is alive but never ready.
+await waitForHaReady({
+  connect: () => haClient.connect(config.homeassistant.url, config.homeassistant.token),
+  ready: haClient.ready,
+  timeoutMs: config.homeassistant.ready_timeout_ms,
+  exit: (code) => process.exit(code),
+  log: (message) => { console.error(message); },
+});
 haReady = true;
 started = true;
 const { labels, areas } = haClient.registryStats;

@@ -1,6 +1,10 @@
 homeassistant:
   url: http://homeassistant.local:8123
   token: !secret ha_token   # or paste token directly as a string
+  # Max wait (ms) for connect plus the first state snapshot; on expiry the process exits 1.
+  # Range 1000-600000. Default shown. Connect retries for up to ~8 minutes; a value below
+  # that cuts the retry short and relies on the supervisor to restart the process.
+  # ready_timeout_ms: 60000
 
 mqtt:
   url: mqtt://localhost:1883
