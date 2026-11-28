@@ -3,7 +3,10 @@
 // Why: connect() can succeed against a Home Assistant that is itself mid-restart and then
 // never deliver the first entity snapshot. The process stays alive, /health/ready stays 503
 // and the orchestrator sees no failure to act on. Connect already has its own bounded
-// retry (connect-retry.ts); this bounds only the wait that follows a successful connect.
+// retry (connect-retry.ts), but a hang inside connect (e.g. the registry load) is
+// indistinguishable from a hang before the snapshot, so one timer bounds connect and the
+// first snapshot together. A value below the connect retry window cuts that retry short
+// and relies on the supervisor to restart the process.
 
 export const MIN_READY_TIMEOUT_MS = 1_000;
 export const MAX_READY_TIMEOUT_MS = 600_000;
@@ -45,8 +48,8 @@ export async function waitForHaReady(deps: StartupReadyDeps): Promise<boolean> {
     const outcome = await Promise.race([connected, timeout]);
     if (outcome === 'ready') return true;
     deps.log(
-      `[homerun] Home Assistant connected but not ready after ${timeoutMs}ms ` +
-      '(no initial state snapshot) — exiting so the supervisor can restart',
+      `[homerun] Home Assistant not ready within ${timeoutMs}ms ` +
+      '(connect or first state snapshot incomplete) — exiting so the supervisor can restart',
     );
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);

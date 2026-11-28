@@ -31,7 +31,21 @@ describe('waitForHaReady', () => {
       await vi.advanceTimersByTimeAsync(5_000);
       await expect(p).resolves.toBe(false);
       expect(d.exit).toHaveBeenCalledExactlyOnceWith(1);
-      expect(d.log).toHaveBeenCalledWith(expect.stringContaining('not ready after 5000ms'));
+      expect(d.log).toHaveBeenCalledWith(expect.stringContaining('not ready within 5000ms'));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('logs and exits 1 when connect never resolves', async () => {
+    vi.useFakeTimers();
+    try {
+      const d = deps({ connect: () => new Promise<void>(() => {}), timeoutMs: 5_000 });
+      const p = waitForHaReady(d);
+      await vi.advanceTimersByTimeAsync(5_000);
+      await expect(p).resolves.toBe(false);
+      expect(d.exit).toHaveBeenCalledExactlyOnceWith(1);
+      expect(d.log).toHaveBeenCalledWith(expect.stringContaining('not ready within 5000ms'));
     } finally {
       vi.useRealTimers();
     }
