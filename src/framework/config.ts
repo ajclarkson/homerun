@@ -4,6 +4,7 @@ import path from 'node:path';
 import { load, CORE_SCHEMA, defineScalarTag } from 'js-yaml';
 import { z } from 'zod';
 import { MAX_HISTORY_ENTRIES } from './schemas.js';
+import { DEFAULT_READY_TIMEOUT_MS, MAX_READY_TIMEOUT_MS, MIN_READY_TIMEOUT_MS } from './startup-ready.js';
 
 // Internal marker for !secret references resolved at load time
 interface SecretRef { __secret: string }
@@ -25,6 +26,9 @@ const ConfigSchema = z.object({
   homeassistant: z.object({
     url: z.string().min(1, 'homeassistant.url is required'),
     token: z.string().min(1, 'homeassistant.token is required'),
+    // Bounds the wait for the first state snapshot after connecting; out of range fails startup.
+    ready_timeout_ms: z.coerce.number().int()
+      .min(MIN_READY_TIMEOUT_MS).max(MAX_READY_TIMEOUT_MS).default(DEFAULT_READY_TIMEOUT_MS),
   }),
   mqtt: z.object({
     url: z.string().min(1, 'mqtt.url is required'),

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Startup no longer waits forever for Home Assistant's first state snapshot. New `homeassistant.ready_timeout_ms` (default 60000, range 1000-600000): if the snapshot has not arrived that long after connecting, the process logs an error and exits 1. A rejected connect also logs and exits 1.
 - Licence changed to AGPL-3.0-only.
 
 ## 0.2.0

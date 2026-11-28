@@ -32,6 +32,19 @@ describe('parseConfig — valid configuration', () => {
     expect(parseConfig(MINIMAL).server.shutdown_timeout_ms).toBe(10_000);
   });
 
+  it('defaults homeassistant.ready_timeout_ms to 60000', () => {
+    expect(parseConfig(MINIMAL).homeassistant.ready_timeout_ms).toBe(60_000);
+  });
+
+  it('respects explicit homeassistant.ready_timeout_ms', () => {
+    const config = parseConfig(MINIMAL.replace('token: test-token', 'token: test-token\n  ready_timeout_ms: 5000'));
+    expect(config.homeassistant.ready_timeout_ms).toBe(5000);
+  });
+
+  it.each([999, 600001])('rejects homeassistant.ready_timeout_ms %i', (v) => {
+    expect(() => parseConfig(MINIMAL.replace('token: test-token', `token: test-token\n  ready_timeout_ms: ${v}`))).toThrow();
+  });
+
   it('defaults options.dry_run to false', () => {
     expect(parseConfig(MINIMAL).options.dry_run).toBe(false);
   });
